@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"reflect"
 
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/helpers"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/internal/provider"
@@ -238,9 +239,7 @@ func CreateContextStreamlit(ctx context.Context, d *schema.ResourceData, meta an
 		for i, v := range raw {
 			integrations[i] = sdk.NewAccountObjectIdentifier(v)
 		}
-		req.WithExternalAccessIntegrations(sdk.ExternalAccessIntegrationsRequest{
-			ExternalAccessIntegrations: integrations,
-		})
+		req.WithExternalAccessIntegrations(integrations)
 	}
 
 	if err := client.Streamlits.Create(ctx, req); err != nil {
@@ -405,12 +404,10 @@ func UpdateContextStreamlit(ctx context.Context, d *schema.ResourceData, meta an
 			}
 			integrations[i] = integrationId
 		}
-		set.WithExternalAccessIntegrations(sdk.ExternalAccessIntegrationsRequest{
-			ExternalAccessIntegrations: integrations,
-		})
+		set.WithExternalAccessIntegrations(integrations)
 	}
 
-	if (*set != sdk.StreamlitSetRequest{}) {
+	if !reflect.DeepEqual(*set, sdk.StreamlitSetRequest{}) {
 		if err := client.Streamlits.Alter(ctx, sdk.NewAlterStreamlitRequest(id).WithSet(*set)); err != nil {
 			return diag.FromErr(err)
 		}
