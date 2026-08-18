@@ -15,13 +15,14 @@ import (
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/config/model"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/config/providermodel"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/testdatatypes"
+	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/testenvs"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/sdk"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 )
 
-func TestAcc_GrantOwnership_OnObject_Database_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnObject_Database_ToAccountRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -71,7 +72,7 @@ func TestAcc_GrantOwnership_OnObject_Database_ToAccountRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnObject_Database_IdentifiersWithDots(t *testing.T) {
+func TestAcc_GrantOwnership_Regression_IdentifiersWithDots(t *testing.T) {
 	databaseId := testClient().Ids.RandomAccountObjectIdentifierContaining(".")
 	_, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSetWithId(t, databaseId)
 	t.Cleanup(databaseCleanup)
@@ -171,7 +172,7 @@ func TestAcc_GrantOwnership_OnObject_Schema_ToAccountRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnObject_Schema_ToDatabaseRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnObject_Schema_ToDatabaseRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -222,7 +223,7 @@ func TestAcc_GrantOwnership_OnObject_Schema_ToDatabaseRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnObject_Table_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnObject_Table_ToAccountRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -327,7 +328,12 @@ func TestAcc_GrantOwnership_OnObject_Table_ToDatabaseRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnObject_ProcedureWithArguments_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnObject_ProcedureWithArguments_ToAccountRole(t *testing.T) {
+	// TODO(SNOW-3954877): unskip or remove after enabling 2026_07 BCR bundle on preprod
+	if testenvs.GetSnowflakeEnvironmentWithProdDefault() != testenvs.SnowflakeProdEnvironment {
+		t.Skip("Skipped on preprod until the 2026_07 BCR bundle is enabled (SNOW-3954877)")
+	}
+
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -431,7 +437,7 @@ func TestAcc_GrantOwnership_OnObject_ProcedureWithoutArguments_ToDatabaseRole(t 
 	})
 }
 
-func TestAcc_GrantOwnership_OnAll_InDatabase_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnAll_InDatabase_ToAccountRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -483,7 +489,7 @@ func TestAcc_GrantOwnership_OnAll_InDatabase_ToAccountRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnAll_InSchema_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnAll_InSchema_ToAccountRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -537,7 +543,7 @@ func TestAcc_GrantOwnership_OnAll_InSchema_ToAccountRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnFuture_InDatabase_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnFuture_InDatabase_ToAccountRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -587,7 +593,7 @@ func TestAcc_GrantOwnership_OnFuture_InDatabase_ToAccountRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_OnFuture_InSchema_ToAccountRole(t *testing.T) {
+func TestAcc_GrantOwnership_BasicUseCase_OnFuture_InSchema_ToAccountRole(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -641,7 +647,7 @@ func TestAcc_GrantOwnership_OnFuture_InSchema_ToAccountRole(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_InvalidConfiguration_EmptyObjectType(t *testing.T) {
+func TestAcc_GrantOwnership_Validations_EmptyObjectType(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -667,7 +673,7 @@ func TestAcc_GrantOwnership_InvalidConfiguration_EmptyObjectType(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_InvalidConfiguration_MultipleTargets(t *testing.T) {
+func TestAcc_GrantOwnership_Validations_MultipleTargets(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -705,7 +711,7 @@ func TestAcc_GrantOwnership_InvalidConfiguration_MultipleTargets(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_TargetObjectRemovedOutsideTerraform(t *testing.T) {
+func TestAcc_GrantOwnership_Regression_TargetObjectRemovedOutsideTerraform(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -758,7 +764,7 @@ func TestAcc_GrantOwnership_TargetObjectRemovedOutsideTerraform(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_AccountRoleRemovedOutsideTerraform(t *testing.T) {
+func TestAcc_GrantOwnership_Regression_AccountRoleRemovedOutsideTerraform(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -868,7 +874,7 @@ func TestAcc_GrantOwnership_OnMaterializedView(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_RoleBasedAccessControlUseCase(t *testing.T) {
+func TestAcc_GrantOwnership_Regression_RoleBasedAccessControl(t *testing.T) {
 	t.Skip("Will be un-skipped in SNOW-1313849")
 
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
@@ -991,7 +997,7 @@ func TestAcc_GrantOwnership_MoveOwnershipOutsideTerraform(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantOwnership_ForceOwnershipTransferOnCreate(t *testing.T) {
+func TestAcc_GrantOwnership_CompleteUseCase_ForceOwnershipTransferOnCreate(t *testing.T) {
 	database, databaseCleanup := testClient().Database.CreateDatabaseWithParametersSet(t)
 	t.Cleanup(databaseCleanup)
 
@@ -1493,7 +1499,7 @@ func TestAcc_GrantOwnership_OnObject_SnowflakeIntelligence_ToAccountRole(t *test
 }
 
 // This test proves that managing grants on HYBRID TABLE is not supported in Snowflake. TABLE should be used instead.
-func TestAcc_GrantOwnership_OnObject_HybridTable_ToAccountRole_Fails(t *testing.T) {
+func TestAcc_GrantOwnership_Validations_HybridTable_ToAccountRole_Fails(t *testing.T) {
 	hybridTableId, hybridTableCleanup := testClient().HybridTable.Create(t)
 	t.Cleanup(hybridTableCleanup)
 

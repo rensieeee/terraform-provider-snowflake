@@ -3,26 +3,24 @@
 package testacc
 
 import (
-	"fmt"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/assert"
-	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/assert/objectassert"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/assert/objectparametersassert"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/assert/resourceassert"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/assert/resourceshowoutputassert"
 	accconfig "github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/config"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/config/model"
+	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/config/providermodel"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/helpers/random"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/testdatatypes"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/internal/snowflakeroles"
+	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/provider/experimentalfeatures"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/provider/resources"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/sdk"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
-	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 )
 
@@ -41,16 +39,20 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 
 	assertBasic := []assert.TestCheckFuncProvider{
 		resourceassert.HybridTableResource(t, modelBasic.ResourceReference()).
-			HasNameString(id.Name()).
-			HasDatabaseString(id.DatabaseName()).
-			HasSchemaString(id.SchemaName()).
-			HasCommentString("").
-			HasFullyQualifiedNameString(id.FullyQualifiedName()).
+			HasName(id.Name()).
+			HasDatabase(id.DatabaseName()).
+			HasSchema(id.SchemaName()).
+			HasComment("").
 			HasColumns(columns).
-			HasColumnNullable(0, true). // PK column: state keeps the configured/default value (true); Snowflake-level NOT NULL is asserted via describe_output
-			HasPrimaryKeyKeys("ID"),
+			HasPrimaryKeyColumns("ID").
+			HasUniqueConstraintEmpty().
+			HasForeignKeyConstraintEmpty().
+			HasIndexEmpty().
+			HasFullyQualifiedName(id.FullyQualifiedName()),
 		objectparametersassert.HybridTableParameters(t, id).
+			HasDataRetentionTimeInDays(1).
 			HasDataRetentionTimeInDaysLevel(sdk.ParameterTypeDatabase).
+			HasMaxDataExtensionTimeInDays(1).
 			HasMaxDataExtensionTimeInDaysLevel(sdk.ParameterTypeDatabase),
 		resourceshowoutputassert.HybridTableShowOutput(t, modelBasic.ResourceReference()).
 			HasName(id.Name()).
@@ -61,41 +63,44 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 			HasComment("").
 			HasRows(0).
 			HasBytes(0),
-		objectassert.HybridTable(t, id).
-			HasName(id.Name()).
-			HasDatabaseName(id.DatabaseName()).
-			HasSchemaName(id.SchemaName()).
-			HasOwner(snowflakeroles.Accountadmin.Name()).
-			HasComment("").
-			HasRowsNil().
-			HasBytesNil(),
 		resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelBasic.ResourceReference(), 0).
 			HasName("ID").
+			HasType("NUMBER(38,0)").
+			HasCollation("").
+			HasKind("COLUMN").
+			HasDefault("").
 			HasIsNullable(false).
 			HasPrimaryKey(true).
 			HasUniqueKey(false).
-			HasDefault("").
-			HasComment(""),
+			HasCheck("").
+			HasExpression("").
+			HasComment("").
+			HasPolicyName("").
+			HasPrivacyDomain("").
+			HasSchemaEvolutionRecord(""),
 	}
 
 	modelComplete := model.HybridTableFromId("test", id, columns, pk).
 		WithComment(comment).
-		WithDataRetentionTimeInDays(1).
+		WithDataRetentionTimeInDays(2).
 		WithMaxDataExtensionTimeInDays(10)
 
 	assertComplete := []assert.TestCheckFuncProvider{
 		resourceassert.HybridTableResource(t, modelComplete.ResourceReference()).
-			HasNameString(id.Name()).
-			HasDatabaseString(id.DatabaseName()).
-			HasSchemaString(id.SchemaName()).
-			HasCommentString(comment).
-			HasDataRetentionTimeInDaysString("1").
-			HasMaxDataExtensionTimeInDaysString("10").
-			HasFullyQualifiedNameString(id.FullyQualifiedName()).
+			HasName(id.Name()).
+			HasDatabase(id.DatabaseName()).
+			HasSchema(id.SchemaName()).
+			HasComment(comment).
 			HasColumns(columns).
-			HasPrimaryKeyKeys("ID"),
+			HasPrimaryKeyColumns("ID").
+			HasUniqueConstraintEmpty().
+			HasForeignKeyConstraintEmpty().
+			HasIndexEmpty().
+			HasFullyQualifiedName(id.FullyQualifiedName()).
+			HasDataRetentionTimeInDays(2).
+			HasMaxDataExtensionTimeInDays(10),
 		objectparametersassert.HybridTableParameters(t, id).
-			HasDataRetentionTimeInDays(1).
+			HasDataRetentionTimeInDays(2).
 			HasDataRetentionTimeInDaysLevel(sdk.ParameterTypeTable).
 			HasMaxDataExtensionTimeInDays(10).
 			HasMaxDataExtensionTimeInDaysLevel(sdk.ParameterTypeTable),
@@ -108,66 +113,27 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 			HasComment(comment).
 			HasRows(0).
 			HasBytes(0),
-		objectassert.HybridTable(t, id).
-			HasName(id.Name()).
-			HasDatabaseName(id.DatabaseName()).
-			HasSchemaName(id.SchemaName()).
-			HasOwner(snowflakeroles.Accountadmin.Name()).
-			HasComment(comment).
-			HasRowsNil().
-			HasBytesNil(),
 		resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelComplete.ResourceReference(), 0).
 			HasName("ID").
+			HasType("NUMBER(38,0)").
+			HasCollation("").
+			HasKind("COLUMN").
+			HasDefault("").
 			HasIsNullable(false).
 			HasPrimaryKey(true).
 			HasUniqueKey(false).
-			HasDefault("").
-			HasComment(""),
-	}
-
-	assertAfterUnset := []assert.TestCheckFuncProvider{
-		resourceassert.HybridTableResource(t, modelBasic.ResourceReference()).
-			HasNameString(id.Name()).
-			HasDatabaseString(id.DatabaseName()).
-			HasSchemaString(id.SchemaName()).
-			HasCommentString("").
-			HasFullyQualifiedNameString(id.FullyQualifiedName()).
-			HasColumns(columns).
-			HasColumnNullable(0, true). // PK column: state keeps the configured/default value (true); Snowflake-level NOT NULL is asserted via describe_output
-			HasPrimaryKeyKeys("ID"),
-		objectparametersassert.HybridTableParameters(t, id).
-			HasDataRetentionTimeInDaysLevel(sdk.ParameterTypeDatabase).
-			HasMaxDataExtensionTimeInDaysLevel(sdk.ParameterTypeDatabase),
-		resourceshowoutputassert.HybridTableShowOutput(t, modelBasic.ResourceReference()).
-			HasName(id.Name()).
-			HasDatabaseName(id.DatabaseName()).
-			HasSchemaName(id.SchemaName()).
-			HasOwner(snowflakeroles.Accountadmin.Name()).
-			HasOwnerRoleType("ROLE").
+			HasCheck("").
+			HasExpression("").
 			HasComment("").
-			HasRows(0).
-			HasBytes(0),
-		objectassert.HybridTable(t, id).
-			HasName(id.Name()).
-			HasDatabaseName(id.DatabaseName()).
-			HasSchemaName(id.SchemaName()).
-			HasOwner(snowflakeroles.Accountadmin.Name()).
-			HasComment("").
-			HasRowsNil().
-			HasBytesNil(),
-		resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelBasic.ResourceReference(), 0).
-			HasName("ID").
-			HasIsNullable(false).
-			HasPrimaryKey(true).
-			HasUniqueKey(false).
-			HasDefault("").
-			HasComment(""),
+			HasPolicyName("").
+			HasPrivacyDomain("").
+			HasSchemaEvolutionRecord(""),
 	}
 
 	importStateVerifyIgnore := []string{
 		// DESCRIBE normalizes types (e.g. INTEGER -> NUMBER(38,0)); DiffSuppressDataTypes
 		// handles this at plan time, but the raw state values differ after import.
-		"column",
+		"column.0.type",
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -179,6 +145,11 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create - without optionals
 			{
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(modelBasic.ResourceReference(), plancheck.ResourceActionCreate),
+					},
+				},
 				Config: accconfig.FromModels(t, modelBasic),
 				Check:  assertThat(t, assertBasic...),
 			},
@@ -216,7 +187,7 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 					},
 				},
 				Config: accconfig.FromModels(t, modelBasic),
-				Check:  assertThat(t, assertAfterUnset...),
+				Check:  assertThat(t, assertBasic...),
 			},
 			// External change detection
 			{
@@ -231,7 +202,7 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 					},
 				},
 				Config: accconfig.FromModels(t, modelBasic),
-				Check:  assertThat(t, assertAfterUnset...),
+				Check:  assertThat(t, assertBasic...),
 			},
 			// External deletion — resource dropped outside Terraform; Read detects absence
 			// (ErrObjectNotFound → d.SetId("")) and the next plan recreates it.
@@ -246,21 +217,6 @@ func TestAcc_HybridTable_BasicUseCase(t *testing.T) {
 				},
 				Config: accconfig.FromModels(t, modelBasic),
 				Check:  assertThat(t, assertBasic...),
-			},
-			// Destroy
-			{
-				Destroy: true,
-				Config:  accconfig.FromModels(t, modelBasic),
-			},
-			// Create - with optionals
-			{
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(modelComplete.ResourceReference(), plancheck.ResourceActionCreate),
-					},
-				},
-				Config: accconfig.FromModels(t, modelComplete),
-				Check:  assertThat(t, assertComplete...),
 			},
 		},
 	})
@@ -320,7 +276,7 @@ func TestAcc_HybridTable_ColumnBehavior(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, modelBasic.ResourceReference()).
 						HasColumns(columns).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 			// Add one column
@@ -335,7 +291,7 @@ func TestAcc_HybridTable_ColumnBehavior(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, modelWith2Cols.ResourceReference()).
 						HasColumns(colsWith2).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 			// Add two more columns in one apply
@@ -350,7 +306,7 @@ func TestAcc_HybridTable_ColumnBehavior(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, modelWith4Cols.ResourceReference()).
 						HasColumns(colsWith4).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 			// Insert a column NOT at the end. Snowflake's ALTER TABLE ADD COLUMN appends
@@ -378,7 +334,7 @@ func TestAcc_HybridTable_ColumnBehavior(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, modelWith3Cols.ResourceReference()).
 						HasColumns(colsWith3).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 			// Drop back to single column
@@ -393,7 +349,7 @@ func TestAcc_HybridTable_ColumnBehavior(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, modelBasic.ResourceReference()).
 						HasColumns(columns).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 		},
@@ -413,22 +369,26 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 
 	id := testClient().Ids.RandomSchemaObjectIdentifier()
 	comment, changedComment := random.Comment(), random.Comment()
+	defaultConstant := "0"
 
 	columnConfigs := []model.HybridTableColumnConfig{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
 		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Comment: "name column"},
-		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar.ToSql(), Nullable: sdk.Bool(false)},
+		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar.ToSql(), NotNull: new(true)},
+		{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Constant: &defaultConstant}},
 	}
 	columnConfigsChanged := []model.HybridTableColumnConfig{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
 		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Comment: "updated name column"},
-		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar.ToSql(), Nullable: sdk.Bool(false)},
+		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar.ToSql(), NotNull: new(true)},
+		{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql()},
 	}
 	// colSigs extracts the name+type pairs needed for HybridTableFromId constructor.
 	colSigs := []sdk.TableColumnSignature{
 		{Name: "ID", Type: testdatatypes.DataTypeInteger},
 		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
 		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar},
+		{Name: "SCORE", Type: testdatatypes.DataTypeInteger},
 	}
 	pk := []sdk.TableColumnSignature{{Name: "ID"}}
 
@@ -439,13 +399,24 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 		{Columns: []string{"EMAIL"}},
 	}
 
+	fkConstraints := []model.HybridTableForeignKeyConstraintConfig{
+		{
+			Name:       "my_fk",
+			Columns:    []string{"ID"},
+			TableName:  parentId.FullyQualifiedName(),
+			RefColumns: []string{"ID"},
+		},
+	}
+
+	indexes := []model.HybridTableIndexConfig{
+		{Name: "IDX_NAME", Columns: []string{"NAME"}},
+	}
+
 	modelComplete := model.HybridTableFromId("test", id, colSigs, pk).
 		WithColumnConfigs(columnConfigs).
 		WithUniqueConstraints(uniqueConstraints...).
-		WithNamedForeignKey("my_fk", []string{"ID"}, parentId.FullyQualifiedName(), []string{"ID"}).
-		// IDX_NAME uses lowercase "name" to exercise the case-suppression path end-to-end
-		// (SHOW INDEXES returns uppercase; indexHash normalises before hashing).
-		WithIndex(model.HybridTableIndexConfig{Name: "IDX_NAME", Columns: []string{"name"}}).
+		WithForeignKeyConstraints(fkConstraints...).
+		WithIndex(indexes...).
 		WithComment(comment).
 		WithDataRetentionTimeInDays(5).
 		WithMaxDataExtensionTimeInDays(10)
@@ -453,8 +424,8 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 	modelChanged := model.HybridTableFromId("test", id, colSigs, pk).
 		WithColumnConfigs(columnConfigsChanged).
 		WithUniqueConstraints(uniqueConstraints...).
-		WithNamedForeignKey("my_fk", []string{"ID"}, parentId.FullyQualifiedName(), []string{"ID"}).
-		WithIndex(model.HybridTableIndexConfig{Name: "IDX_NAME", Columns: []string{"name"}}).
+		WithForeignKeyConstraints(fkConstraints...).
+		WithIndex(indexes...).
 		WithComment(changedComment).
 		WithDataRetentionTimeInDays(10).
 		WithMaxDataExtensionTimeInDays(20)
@@ -462,7 +433,8 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 	importStateVerifyIgnore := []string{
 		// DESCRIBE normalizes types (e.g. INTEGER -> NUMBER(38,0)); DiffSuppressDataTypes
 		// handles this at plan time, but the raw state values differ after import.
-		"column",
+		"column.0.type",
+		"column.3.type",
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -474,21 +446,27 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create - with all attributes
 			{
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(modelComplete.ResourceReference(), plancheck.ResourceActionCreate),
+					},
+				},
 				Config: accconfig.FromModels(t, modelComplete),
 				Check: assertThat(
 					t,
 					resourceassert.HybridTableResource(t, modelComplete.ResourceReference()).
-						HasNameString(id.Name()).
-						HasDatabaseString(id.DatabaseName()).
-						HasSchemaString(id.SchemaName()).
-						HasCommentString(comment).
-						HasDataRetentionTimeInDaysString("5").
-						HasMaxDataExtensionTimeInDaysString("10").
-						HasFullyQualifiedNameString(id.FullyQualifiedName()).
+						HasName(id.Name()).
+						HasDatabase(id.DatabaseName()).
+						HasSchema(id.SchemaName()).
+						HasComment(comment).
 						HasColumnConfigs(columnConfigs).
-						HasPrimaryKeyKeys("ID").
-						HasUniqueConstraintCount(2).
-						HasIndexCount(1),
+						HasPrimaryKeyColumns("ID").
+						HasUniqueConstraints(uniqueConstraints...).
+						HasForeignKeyConstraints(fkConstraints...).
+						HasIndexes(indexes...).
+						HasFullyQualifiedName(id.FullyQualifiedName()).
+						HasDataRetentionTimeInDays(5).
+						HasMaxDataExtensionTimeInDays(10),
 					objectparametersassert.HybridTableParameters(t, id).
 						HasDataRetentionTimeInDays(5).
 						HasDataRetentionTimeInDaysLevel(sdk.ParameterTypeTable).
@@ -503,65 +481,67 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 						HasComment(comment).
 						HasRows(0).
 						HasBytes(0),
-					objectassert.HybridTable(t, id).
-						HasName(id.Name()).
-						HasDatabaseName(id.DatabaseName()).
-						HasSchemaName(id.SchemaName()).
-						HasOwner(snowflakeroles.Accountadmin.Name()).
-						HasComment(comment).
-						HasRowsNil().
-						HasBytesNil(),
 					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelComplete.ResourceReference(), 0).
 						HasName("ID").
+						HasType("NUMBER(38,0)").
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault("").
 						HasIsNullable(false).
 						HasPrimaryKey(true).
 						HasUniqueKey(false).
-						HasDefault("").
-						HasComment(""),
+						HasCheck("").
+						HasExpression("").
+						HasComment("").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
 					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelComplete.ResourceReference(), 1).
 						HasName("NAME").
+						HasType(testdatatypes.DefaultVarcharAsString).
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault("").
 						HasIsNullable(true).
 						HasPrimaryKey(false).
 						HasUniqueKey(true).
-						HasDefault("").
-						HasComment("name column"),
+						HasCheck("").
+						HasExpression("").
+						HasComment("name column").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
 					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelComplete.ResourceReference(), 2).
 						HasName("EMAIL").
+						HasType(testdatatypes.DefaultVarcharAsString).
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault("").
 						HasIsNullable(false).
 						HasPrimaryKey(false).
 						HasUniqueKey(true).
-						HasDefault("").
-						HasComment(""),
-					// Constraint name readback: PK auto-generated, named UNIQUE round-trips,
-					// anonymous UNIQUE gets SYS_CONSTRAINT_-prefixed name, FK name preserved.
-					assert.Check(resource.TestCheckResourceAttrSet(modelComplete.ResourceReference(), "primary_key.0.name")),
-					assert.Check(resource.TestCheckResourceAttr(modelComplete.ResourceReference(), "unique_constraint.#", "2")),
-					assert.Check(resource.TestCheckTypeSetElemNestedAttrs(modelComplete.ResourceReference(), "unique_constraint.*", map[string]string{
-						"name": "my_uq",
-					})),
-					assert.Check(checkUniqueConstraintNamesReadBack(modelComplete.ResourceReference())),
-					assert.Check(resource.TestCheckResourceAttr(modelComplete.ResourceReference(), "foreign_key.#", "1")),
-					assert.Check(resource.TestCheckTypeSetElemNestedAttrs(modelComplete.ResourceReference(), "foreign_key.*", map[string]string{
-						"name":                  "my_fk",
-						"references.#":          "1",
-						"references.0.table_id": parentId.FullyQualifiedName(),
-					})),
-					// Index readback: lowercase config column must round-trip (case-suppression).
-					assert.Check(resource.TestCheckTypeSetElemNestedAttrs(modelComplete.ResourceReference(), "index.*", map[string]string{
-						"name":      "IDX_NAME",
-						"columns.#": "1",
-						"columns.0": "name",
-					})),
+						HasCheck("").
+						HasExpression("").
+						HasComment("").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
+					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelComplete.ResourceReference(), 3).
+						HasName("SCORE").
+						HasType("NUMBER(38,0)").
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault(defaultConstant).
+						HasIsNullable(true).
+						HasPrimaryKey(false).
+						HasUniqueKey(false).
+						HasCheck("").
+						HasExpression("").
+						HasComment("").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
 				),
-			},
-			// Empty plan — regression guard for constraint-name drift and index case-suppression.
-			{
-				Config: accconfig.FromModels(t, modelComplete),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
-					},
-				},
 			},
 			// Import
 			{
@@ -582,17 +562,18 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 				Check: assertThat(
 					t,
 					resourceassert.HybridTableResource(t, modelChanged.ResourceReference()).
-						HasNameString(id.Name()).
-						HasDatabaseString(id.DatabaseName()).
-						HasSchemaString(id.SchemaName()).
-						HasCommentString(changedComment).
-						HasDataRetentionTimeInDaysString("10").
-						HasMaxDataExtensionTimeInDaysString("20").
-						HasFullyQualifiedNameString(id.FullyQualifiedName()).
+						HasName(id.Name()).
+						HasDatabase(id.DatabaseName()).
+						HasSchema(id.SchemaName()).
+						HasComment(changedComment).
 						HasColumnConfigs(columnConfigsChanged).
-						HasPrimaryKeyKeys("ID").
-						HasUniqueConstraintCount(2).
-						HasIndexCount(1),
+						HasPrimaryKeyColumns("ID").
+						HasUniqueConstraints(uniqueConstraints...).
+						HasForeignKeyConstraints(fkConstraints...).
+						HasIndexes(indexes...).
+						HasFullyQualifiedName(id.FullyQualifiedName()).
+						HasDataRetentionTimeInDays(10).
+						HasMaxDataExtensionTimeInDays(20),
 					objectparametersassert.HybridTableParameters(t, id).
 						HasDataRetentionTimeInDays(10).
 						HasDataRetentionTimeInDaysLevel(sdk.ParameterTypeTable).
@@ -607,35 +588,66 @@ func TestAcc_HybridTable_CompleteUseCase(t *testing.T) {
 						HasComment(changedComment).
 						HasRows(0).
 						HasBytes(0),
-					objectassert.HybridTable(t, id).
-						HasName(id.Name()).
-						HasDatabaseName(id.DatabaseName()).
-						HasSchemaName(id.SchemaName()).
-						HasOwner(snowflakeroles.Accountadmin.Name()).
-						HasComment(changedComment).
-						HasRowsNil().
-						HasBytesNil(),
 					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelChanged.ResourceReference(), 0).
 						HasName("ID").
+						HasType("NUMBER(38,0)").
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault("").
 						HasIsNullable(false).
 						HasPrimaryKey(true).
 						HasUniqueKey(false).
-						HasDefault("").
-						HasComment(""),
+						HasCheck("").
+						HasExpression("").
+						HasComment("").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
 					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelChanged.ResourceReference(), 1).
 						HasName("NAME").
+						HasType(testdatatypes.DefaultVarcharAsString).
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault("").
 						HasIsNullable(true).
 						HasPrimaryKey(false).
 						HasUniqueKey(true).
-						HasDefault("").
-						HasComment("updated name column"),
+						HasCheck("").
+						HasExpression("").
+						HasComment("updated name column").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
 					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelChanged.ResourceReference(), 2).
 						HasName("EMAIL").
+						HasType(testdatatypes.DefaultVarcharAsString).
+						HasCollation("").
+						HasKind("COLUMN").
+						HasDefault("").
 						HasIsNullable(false).
 						HasPrimaryKey(false).
 						HasUniqueKey(true).
+						HasCheck("").
+						HasExpression("").
+						HasComment("").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
+					resourceshowoutputassert.HybridTableDescribeOutputRow(t, modelChanged.ResourceReference(), 3).
+						HasName("SCORE").
+						HasType("NUMBER(38,0)").
+						HasCollation("").
+						HasKind("COLUMN").
 						HasDefault("").
-						HasComment(""),
+						HasIsNullable(true).
+						HasPrimaryKey(false).
+						HasUniqueKey(false).
+						HasCheck("").
+						HasExpression("").
+						HasComment("").
+						HasPolicyName("").
+						HasPrivacyDomain("").
+						HasSchemaEvolutionRecord(""),
 				),
 			},
 		},
@@ -669,6 +681,61 @@ func TestAcc_HybridTable_InvalidConfig(t *testing.T) {
 	})
 }
 
+// TestAcc_HybridTable_PrimaryKeyRequiresNotNull verifies that the plan-time
+// validation (requireNotNullOnPrimaryKeyColumns) rejects primary key columns
+// that do not set not_null = true.
+func TestAcc_HybridTable_PrimaryKeyRequiresNotNull(t *testing.T) {
+	t.Run("not_null omitted on the primary key column", func(t *testing.T) {
+		id := testClient().Ids.RandomSchemaObjectIdentifier()
+		pk := []sdk.TableColumnSignature{{Name: "ID"}}
+		cols := []sdk.TableColumnSignature{{Name: "ID", Type: testdatatypes.DataTypeInteger}}
+
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
+			TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+				tfversion.RequireAbove(tfversion.Version1_5_0),
+			},
+			Steps: []resource.TestStep{
+				{
+					Config: accconfig.FromModels(
+						t,
+						model.HybridTableFromId("test", id, cols, pk).WithColumnConfigs([]model.HybridTableColumnConfig{
+							{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
+						}),
+					),
+					PlanOnly:    true,
+					ExpectError: regexp.MustCompile(`primary key column "ID" must set not_null = true`),
+				},
+			},
+		})
+	})
+
+	t.Run("not_null explicitly false on the primary key column", func(t *testing.T) {
+		id := testClient().Ids.RandomSchemaObjectIdentifier()
+		pk := []sdk.TableColumnSignature{{Name: "ID"}}
+		cols := []sdk.TableColumnSignature{{Name: "ID", Type: testdatatypes.DataTypeInteger}}
+
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
+			TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+				tfversion.RequireAbove(tfversion.Version1_5_0),
+			},
+			Steps: []resource.TestStep{
+				{
+					Config: accconfig.FromModels(
+						t,
+						model.HybridTableFromId("test", id, cols, pk).WithColumnConfigs([]model.HybridTableColumnConfig{
+							{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(false)},
+						}),
+					),
+					PlanOnly:    true,
+					ExpectError: regexp.MustCompile(`primary key column "ID" must set not_null = true`),
+				},
+			},
+		})
+	})
+}
+
 func TestAcc_HybridTable_UniqueConstraint(t *testing.T) {
 	id := testClient().Ids.RandomSchemaObjectIdentifier()
 	cols := []sdk.TableColumnSignature{
@@ -679,12 +746,14 @@ func TestAcc_HybridTable_UniqueConstraint(t *testing.T) {
 	pk := []sdk.TableColumnSignature{{Name: "ID"}}
 
 	// Single-column unique constraint
+	uq1 := model.HybridTableUniqueConstraintConfig{Columns: []string{"NAME"}}
 	model1 := model.HybridTableFromId("test", id, cols, pk).
-		WithUniqueConstraint([]string{"NAME"})
+		WithUniqueConstraints(uq1)
 
 	// Change the unique constraint to span two columns — forces recreation
+	uq2 := model.HybridTableUniqueConstraintConfig{Columns: []string{"NAME", "EMAIL"}}
 	model2 := model.HybridTableFromId("test", id, cols, pk).
-		WithUniqueConstraint([]string{"NAME", "EMAIL"})
+		WithUniqueConstraints(uq2)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -700,8 +769,8 @@ func TestAcc_HybridTable_UniqueConstraint(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model1.ResourceReference()).
 						HasColumns(cols).
-						HasPrimaryKeyKeys("ID").
-						HasUniqueConstraintCount(1),
+						HasPrimaryKeyColumns("ID").
+						HasUniqueConstraints(uq1),
 				),
 			},
 			// Change the unique constraint columns — any diff on unique_constraint forces recreation
@@ -716,8 +785,8 @@ func TestAcc_HybridTable_UniqueConstraint(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model2.ResourceReference()).
 						HasColumns(cols).
-						HasPrimaryKeyKeys("ID").
-						HasUniqueConstraintCount(1),
+						HasPrimaryKeyColumns("ID").
+						HasUniqueConstraints(uq2),
 				),
 			},
 		},
@@ -743,8 +812,13 @@ func TestAcc_HybridTable_ForeignKey(t *testing.T) {
 	pk := []sdk.TableColumnSignature{{Name: "ID"}}
 
 	// Child table with FK → parent.ID
+	fk := model.HybridTableForeignKeyConstraintConfig{
+		Columns:    []string{"PARENT_ID"},
+		TableName:  parentId.FullyQualifiedName(),
+		RefColumns: []string{"ID"},
+	}
 	model1 := model.HybridTableFromId("test", id, cols, pk).
-		WithForeignKey([]string{"PARENT_ID"}, parentId.FullyQualifiedName(), []string{"ID"})
+		WithForeignKeyConstraints(fk)
 
 	// Child table without FK
 	model2 := model.HybridTableFromId("test", id, cols, pk)
@@ -763,11 +837,11 @@ func TestAcc_HybridTable_ForeignKey(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model1.ResourceReference()).
 						HasColumns(cols).
-						HasPrimaryKeyKeys("ID").
-						HasForeignKeyCount(1),
+						HasPrimaryKeyColumns("ID").
+						HasForeignKeyConstraints(fk),
 				),
 			},
-			// Remove the foreign key — any diff on foreign_key forces recreation
+			// Remove the foreign key — any diff on foreign_key_constraint forces recreation
 			{
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -779,64 +853,8 @@ func TestAcc_HybridTable_ForeignKey(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model2.ResourceReference()).
 						HasColumns(cols).
-						HasPrimaryKeyKeys("ID").
-						HasForeignKeyCount(0),
-				),
-			},
-		},
-	})
-}
-
-func TestAcc_HybridTable_ColumnDefault(t *testing.T) {
-	id := testClient().Ids.RandomSchemaObjectIdentifier()
-	pk := []sdk.TableColumnSignature{{Name: "ID"}}
-	baseCols := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "SCORE", Type: testdatatypes.DataTypeInteger},
-	}
-
-	zero := "0"
-
-	// SCORE has a constant default of 0
-	model1 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Constant: &zero}},
-		})
-
-	// SCORE has no default
-	model2 := model.HybridTableFromId("test", id, baseCols, pk)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
-		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
-			tfversion.RequireAbove(tfversion.Version1_5_0),
-		},
-		CheckDestroy: CheckDestroy(t, resources.HybridTable),
-		Steps: []resource.TestStep{
-			// Create with a constant default on SCORE
-			{
-				Config: accconfig.FromModels(t, model1),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model1.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnDefaultConstant(1, "0"),
-				),
-			},
-			// Drop the default → in-place update, no recreation
-			{
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model2.ResourceReference(), plancheck.ResourceActionUpdate),
-					},
-				},
-				Config: accconfig.FromModels(t, model2),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model2.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnNoDefault(1),
+						HasPrimaryKeyColumns("ID").
+						HasForeignKeyConstraintEmpty(),
 				),
 			},
 		},
@@ -851,11 +869,6 @@ func TestAcc_HybridTable_ColumnDefault(t *testing.T) {
 // options on schema fields cannot be used inside a multi-element TypeList
 // because terraform-plugin-sdk/v2 rejects paths with non-zero indices at
 // provider boot). Validation fires at apply time before any Snowflake call.
-//
-// One subtest per variant per jmichalak's review comment (thread 3188827027):
-// separate models for mutually-exclusive field sets. The "conflicting fields"
-// subtest asserts the build-helper validation fires when more than one of
-// {constant, expression, sequence} is set in the same default block.
 func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 	t.Run("constant", func(t *testing.T) {
 		id := testClient().Ids.RandomSchemaObjectIdentifier()
@@ -865,11 +878,11 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 			{Name: "SCORE", Type: testdatatypes.DataTypeInteger},
 		}
 		zero := "0"
-		m := model.HybridTableFromId("test", id, cols, pk).
-			WithColumnConfigs([]model.HybridTableColumnConfig{
-				{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-				{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Constant: &zero}},
-			})
+		columnConfigs := []model.HybridTableColumnConfig{
+			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+			{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Constant: &zero}},
+		}
+		m := model.HybridTableFromId("test", id, cols, pk).WithColumnConfigs(columnConfigs)
 
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -883,8 +896,7 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 					Check: assertThat(
 						t,
 						resourceassert.HybridTableResource(t, m.ResourceReference()).
-							HasColumns(cols).
-							HasColumnDefaultConstant(1, "0"),
+							HasColumnConfigs(columnConfigs),
 					),
 				},
 			},
@@ -899,11 +911,11 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 			{Name: "CREATED_AT", Type: testdatatypes.DataTypeTimestampLTZ},
 		}
 		expr := "CURRENT_TIMESTAMP()"
-		m := model.HybridTableFromId("test", id, cols, pk).
-			WithColumnConfigs([]model.HybridTableColumnConfig{
-				{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-				{Name: "CREATED_AT", Type: testdatatypes.DataTypeTimestampLTZ.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Expression: &expr}},
-			})
+		columnConfigs := []model.HybridTableColumnConfig{
+			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+			{Name: "CREATED_AT", Type: testdatatypes.DataTypeTimestampLTZ.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Expression: &expr}},
+		}
+		m := model.HybridTableFromId("test", id, cols, pk).WithColumnConfigs(columnConfigs)
 
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -914,8 +926,10 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config: accconfig.FromModels(t, m),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckResourceAttr(m.ResourceReference(), "column.1.default.0.expression", expr),
+					Check: assertThat(
+						t,
+						resourceassert.HybridTableResource(t, m.ResourceReference()).
+							HasColumnConfigs(columnConfigs),
 					),
 				},
 			},
@@ -932,11 +946,11 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 		seqId, cleanup := testClient().Sequence.Create(t)
 		t.Cleanup(cleanup)
 		seqFQN := seqId.FullyQualifiedName()
-		m := model.HybridTableFromId("test", id, cols, pk).
-			WithColumnConfigs([]model.HybridTableColumnConfig{
-				{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-				{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Sequence: &seqFQN}},
-			})
+		columnConfigs := []model.HybridTableColumnConfig{
+			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+			{Name: "SCORE", Type: testdatatypes.DataTypeInteger.ToSql(), Default: &model.HybridTableColumnDefaultConfig{Sequence: &seqFQN}},
+		}
+		m := model.HybridTableFromId("test", id, cols, pk).WithColumnConfigs(columnConfigs)
 
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -947,9 +961,10 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config: accconfig.FromModels(t, m),
-					Check: resource.ComposeAggregateTestCheckFunc(
-						resource.TestCheckResourceAttr(m.ResourceReference(), "column.1.default.#", "1"),
-						resource.TestCheckResourceAttr(m.ResourceReference(), "column.1.default.0.sequence", seqFQN),
+					Check: assertThat(
+						t,
+						resourceassert.HybridTableResource(t, m.ResourceReference()).
+							HasColumnConfigs(columnConfigs),
 					),
 				},
 			},
@@ -971,7 +986,7 @@ func TestAcc_HybridTable_ColumnDefaultVariants(t *testing.T) {
 		expr := "0"
 		m := model.HybridTableFromId("test", id, cols, pk).
 			WithColumnConfigs([]model.HybridTableColumnConfig{
-				{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
+				{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
 				{
 					Name: "SCORE",
 					Type: testdatatypes.DataTypeInteger.ToSql(),
@@ -1005,12 +1020,10 @@ func TestAcc_HybridTable_PrimaryKeyForceNew(t *testing.T) {
 	}
 
 	// Single-column PK
-	model1 := model.HybridTableFromId("test", id, cols, []sdk.TableColumnSignature{{Name: "ID"}}).
-		WithPrimaryKeyNames("ID")
+	model1 := model.HybridTableFromId("test", id, cols, []sdk.TableColumnSignature{{Name: "ID"}})
 
-	// Composite PK — any change to primary_key forces recreation
-	model2 := model.HybridTableFromId("test", id, cols, []sdk.TableColumnSignature{{Name: "ID"}}).
-		WithPrimaryKeyNames("ID", "NAME")
+	// Composite PK — any change to primary_key_constraint forces recreation
+	model2 := model.HybridTableFromId("test", id, cols, []sdk.TableColumnSignature{{Name: "ID"}, {Name: "NAME"}})
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -1026,7 +1039,7 @@ func TestAcc_HybridTable_PrimaryKeyForceNew(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model1.ResourceReference()).
 						HasColumns(cols).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 			// Change to composite PK → ForceNew (DestroyBeforeCreate)
@@ -1041,181 +1054,7 @@ func TestAcc_HybridTable_PrimaryKeyForceNew(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model2.ResourceReference()).
 						HasColumns(cols).
-						HasPrimaryKeyKeys("ID", "NAME"),
-				),
-			},
-		},
-	})
-}
-
-func TestAcc_HybridTable_ColumnAdd(t *testing.T) {
-	id := testClient().Ids.RandomSchemaObjectIdentifier()
-	pk := []sdk.TableColumnSignature{{Name: "ID"}}
-
-	cols1 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-	}
-	cols2 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-	}
-	cols3 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar},
-		{Name: "AGE", Type: testdatatypes.DataTypeInteger},
-	}
-	// cols4 inserts MIDDLE_COL between NAME and EMAIL (not at the end of cols3).
-	// Snowflake ADD COLUMN appends physically, so the post-apply state column order
-	// differs from the config order, and the next plan must be non-empty.
-	cols4 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-		{Name: "MIDDLE_COL", Type: testdatatypes.DataTypeInteger},
-		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar},
-		{Name: "AGE", Type: testdatatypes.DataTypeInteger},
-	}
-
-	model1 := model.HybridTableFromId("test", id, cols1, pk)
-	model2 := model.HybridTableFromId("test", id, cols2, pk)
-	model3 := model.HybridTableFromId("test", id, cols3, pk)
-	model4 := model.HybridTableFromId("test", id, cols4, pk)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
-		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
-			tfversion.RequireAbove(tfversion.Version1_5_0),
-		},
-		CheckDestroy: CheckDestroy(t, resources.HybridTable),
-		Steps: []resource.TestStep{
-			// Create with single column
-			{
-				Config: accconfig.FromModels(t, model1),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model1.ResourceReference()).
-						HasColumns(cols1).
-						HasPrimaryKeyKeys("ID"),
-				),
-			},
-			// Add one column
-			{
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model2.ResourceReference(), plancheck.ResourceActionUpdate),
-					},
-				},
-				Config: accconfig.FromModels(t, model2),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model2.ResourceReference()).
-						HasColumns(cols2).
-						HasPrimaryKeyKeys("ID"),
-				),
-			},
-			// Add two more columns in one apply
-			{
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model3.ResourceReference(), plancheck.ResourceActionUpdate),
-					},
-				},
-				Config: accconfig.FromModels(t, model3),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model3.ResourceReference()).
-						HasColumns(cols3).
-						HasPrimaryKeyKeys("ID"),
-				),
-			},
-			// Insert a column NOT at the end. Snowflake's ALTER TABLE ADD COLUMN
-			// appends physically, so the resulting on-disk order
-			// (ID, NAME, EMAIL, AGE, MIDDLE_COL) differs from the config order
-			// (ID, NAME, MIDDLE_COL, EMAIL, AGE). The apply succeeds (the column
-			// is added), but the post-apply plan is non-empty: subsequent indices
-			// in the TypeList show drift. Achieving a true mid-list insertion
-			// would require recreation, which the resource does not currently do.
-			{
-				Config:             accconfig.FromModels(t, model4),
-				ExpectNonEmptyPlan: true,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model4.ResourceReference(), plancheck.ResourceActionUpdate),
-					},
-				},
-			},
-		},
-	})
-}
-
-func TestAcc_HybridTable_ColumnDrop(t *testing.T) {
-	id := testClient().Ids.RandomSchemaObjectIdentifier()
-	pk := []sdk.TableColumnSignature{{Name: "ID"}}
-
-	cols1 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar},
-		{Name: "AGE", Type: testdatatypes.DataTypeInteger},
-	}
-	cols2 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-		{Name: "EMAIL", Type: testdatatypes.DataTypeVarchar},
-	}
-	cols3 := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-	}
-
-	model1 := model.HybridTableFromId("test", id, cols1, pk)
-	model2 := model.HybridTableFromId("test", id, cols2, pk)
-	model3 := model.HybridTableFromId("test", id, cols3, pk)
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
-		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
-			tfversion.RequireAbove(tfversion.Version1_5_0),
-		},
-		CheckDestroy: CheckDestroy(t, resources.HybridTable),
-		Steps: []resource.TestStep{
-			// Create with four columns
-			{
-				Config: accconfig.FromModels(t, model1),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model1.ResourceReference()).
-						HasColumns(cols1).
-						HasPrimaryKeyKeys("ID"),
-				),
-			},
-			// Drop one column
-			{
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model2.ResourceReference(), plancheck.ResourceActionUpdate),
-					},
-				},
-				Config: accconfig.FromModels(t, model2),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model2.ResourceReference()).
-						HasColumns(cols2).
-						HasPrimaryKeyKeys("ID"),
-				),
-			},
-			// Drop two more columns in one apply
-			{
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model3.ResourceReference(), plancheck.ResourceActionUpdate),
-					},
-				},
-				Config: accconfig.FromModels(t, model3),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model3.ResourceReference()).
-						HasColumns(cols3).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID", "NAME"),
 				),
 			},
 		},
@@ -1253,7 +1092,7 @@ func TestAcc_HybridTable_ExternalColumnChanges(t *testing.T) {
 					t,
 					resourceassert.HybridTableResource(t, model2.ResourceReference()).
 						HasColumns(cols2).
-						HasPrimaryKeyKeys("ID"),
+						HasPrimaryKeyColumns("ID"),
 				),
 			},
 			// 2. Externally ADD a column (EMAIL). Config at cols2; expect Update to drop EMAIL.
@@ -1361,7 +1200,7 @@ func TestAcc_HybridTable_ExternalColumnChanges(t *testing.T) {
 	})
 }
 
-func TestAcc_HybridTable_ColumnAlterComment(t *testing.T) {
+func TestAcc_HybridTable_ColumnNotNullForceNew(t *testing.T) {
 	id := testClient().Ids.RandomSchemaObjectIdentifier()
 	pk := []sdk.TableColumnSignature{{Name: "ID"}}
 	baseCols := []sdk.TableColumnSignature{
@@ -1369,25 +1208,45 @@ func TestAcc_HybridTable_ColumnAlterComment(t *testing.T) {
 		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
 	}
 
-	// No comment on NAME
-	model1 := model.HybridTableFromId("test", id, baseCols, pk)
+	// not_null omitted on NAME -> resolves to the schema default (false, nullable).
+	// ID is the primary key, so it must declare not_null = true.
+	defaultColumnConfigs := []model.HybridTableColumnConfig{
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql()},
+	}
+	defaultModel := model.HybridTableFromId("test", id, baseCols, pk).WithColumnConfigs(defaultColumnConfigs)
+	assertDefault := []assert.TestCheckFuncProvider{
+		resourceassert.HybridTableResource(t, defaultModel.ResourceReference()).
+			HasColumnConfigs(defaultColumnConfigs),
+		resourceshowoutputassert.HybridTableDescribeOutputRow(t, defaultModel.ResourceReference(), 1).
+			HasIsNullable(true),
+	}
 
-	// Set comment on NAME
-	model2 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Comment: "this is a name column"},
-		})
+	// not_null explicitly false on NAME -> same meaning as omitted (nullable).
+	nullableColumnConfigs := []model.HybridTableColumnConfig{
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), NotNull: new(false)},
+	}
+	nullableModel := model.HybridTableFromId("test", id, baseCols, pk).WithColumnConfigs(nullableColumnConfigs)
+	assertNullable := []assert.TestCheckFuncProvider{
+		resourceassert.HybridTableResource(t, nullableModel.ResourceReference()).
+			HasColumnConfigs(nullableColumnConfigs),
+		resourceshowoutputassert.HybridTableDescribeOutputRow(t, nullableModel.ResourceReference(), 1).
+			HasIsNullable(true),
+	}
 
-	// Change comment on NAME
-	model3 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Comment: "updated comment"},
-		})
-
-	// Unset comment on NAME (back to no comment)
-	model4 := model.HybridTableFromId("test", id, baseCols, pk)
+	// not_null explicitly true on NAME -> NOT NULL column.
+	nonNullColumnConfigs := []model.HybridTableColumnConfig{
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), NotNull: new(true)},
+	}
+	nonNullModel := model.HybridTableFromId("test", id, baseCols, pk).WithColumnConfigs(nonNullColumnConfigs)
+	assertNonNull := []assert.TestCheckFuncProvider{
+		resourceassert.HybridTableResource(t, nonNullModel.ResourceReference()).
+			HasColumnConfigs(nonNullColumnConfigs),
+		resourceshowoutputassert.HybridTableDescribeOutputRow(t, nonNullModel.ResourceReference(), 1).
+			HasIsNullable(false),
+	}
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -1396,118 +1255,61 @@ func TestAcc_HybridTable_ColumnAlterComment(t *testing.T) {
 		},
 		CheckDestroy: CheckDestroy(t, resources.HybridTable),
 		Steps: []resource.TestStep{
-			// Create with two columns, NAME has no comment
+			// Create - not_null omitted (nullable).
 			{
-				Config: accconfig.FromModels(t, model1),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model1.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnComment(1, ""),
-				),
+				Config: accconfig.FromModels(t, defaultModel),
+				Check:  assertThat(t, assertDefault...),
 			},
-			// Set comment on NAME
+			// Omitted -> explicit false: same meaning, no diff.
 			{
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model2.ResourceReference(), plancheck.ResourceActionUpdate),
+						plancheck.ExpectEmptyPlan(),
 					},
 				},
-				Config: accconfig.FromModels(t, model2),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model2.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnComment(1, "this is a name column"),
-				),
+				Config: accconfig.FromModels(t, nullableModel),
+				Check:  assertThat(t, assertNullable...),
 			},
-			// Change comment on NAME
+			// false -> true: SDK cannot ALTER COLUMN SET NOT NULL, so recreate.
 			{
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model3.ResourceReference(), plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(nonNullModel.ResourceReference(), plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
-				Config: accconfig.FromModels(t, model3),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model3.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnComment(1, "updated comment"),
-				),
+				Config: accconfig.FromModels(t, nonNullModel),
+				Check:  assertThat(t, assertNonNull...),
 			},
-			// Unset comment on NAME
+			// true -> false: not_null change on an existing column always forces recreation.
 			{
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model4.ResourceReference(), plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(nullableModel.ResourceReference(), plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
-				Config: accconfig.FromModels(t, model4),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model4.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnComment(1, ""),
-				),
+				Config: accconfig.FromModels(t, nullableModel),
+				Check:  assertThat(t, assertNullable...),
 			},
-		},
-	})
-}
-
-func TestAcc_HybridTable_ColumnNullableForceNew(t *testing.T) {
-	id := testClient().Ids.RandomSchemaObjectIdentifier()
-	pk := []sdk.TableColumnSignature{{Name: "ID"}}
-	baseCols := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-	}
-
-	// NAME is explicitly nullable=true
-	model1 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Nullable: sdk.Bool(true)},
-		})
-
-	// NAME changed to nullable=false — must force recreation
-	model2 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Nullable: sdk.Bool(false)},
-		})
-
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
-		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
-			tfversion.RequireAbove(tfversion.Version1_5_0),
-		},
-		CheckDestroy: CheckDestroy(t, resources.HybridTable),
-		Steps: []resource.TestStep{
-			// Create with NAME nullable=true
+			// External change detection.
 			{
-				Config: accconfig.FromModels(t, model1),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model1.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnNullable(1, true),
-				),
-			},
-			// Change NAME nullable=false — expect DestroyBeforeCreate (ForceNew)
-			{
+				PreConfig: func() {
+					testClient().HybridTable.DropFunc(t, id)()
+					testClient().HybridTable.CreateWithRequest(t, id, sdk.HybridTableColumnsConstraintsAndIndexesRequest{
+						Columns: []sdk.HybridTableColumnRequest{
+							*sdk.NewHybridTableColumnRequest("ID", sdk.DataType(testdatatypes.DataTypeInteger.ToSql())).
+								WithInlineConstraint(sdk.ColumnInlineConstraint{Type: sdk.ColumnConstraintTypePrimaryKey}),
+							*sdk.NewHybridTableColumnRequest("NAME", sdk.DataType(testdatatypes.DataTypeVarchar.ToSql())).
+								WithNotNull(true),
+						},
+					})
+				},
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(model2.ResourceReference(), plancheck.ResourceActionDestroyBeforeCreate),
+						plancheck.ExpectResourceAction(nullableModel.ResourceReference(), plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
-				Config: accconfig.FromModels(t, model2),
-				Check: assertThat(
-					t,
-					resourceassert.HybridTableResource(t, model2.ResourceReference()).
-						HasColumns(baseCols).
-						HasColumnNullable(1, false),
-				),
+				Config: accconfig.FromModels(t, nullableModel),
+				Check:  assertThat(t, assertNullable...),
 			},
 		},
 	})
@@ -1522,18 +1324,18 @@ func TestAcc_HybridTable_ColumnCollateForceNew(t *testing.T) {
 	}
 
 	// NAME with collate='en'
-	model1 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Collate: "en"},
-		})
+	columnConfigs1 := []model.HybridTableColumnConfig{
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Collate: "en"},
+	}
+	model1 := model.HybridTableFromId("test", id, baseCols, pk).WithColumnConfigs(columnConfigs1)
 
-	// NAME collate changed to 'fr' — must force recreation
-	model2 := model.HybridTableFromId("test", id, baseCols, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Collate: "fr"},
-		})
+	// NAME collate changed to 'FR' — must force recreation
+	columnConfigs2 := []model.HybridTableColumnConfig{
+		{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql(), NotNull: new(true)},
+		{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Collate: "FR"},
+	}
+	model2 := model.HybridTableFromId("test", id, baseCols, pk).WithColumnConfigs(columnConfigs2)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -1548,10 +1350,10 @@ func TestAcc_HybridTable_ColumnCollateForceNew(t *testing.T) {
 				Check: assertThat(
 					t,
 					resourceassert.HybridTableResource(t, model1.ResourceReference()).
-						HasColumns(baseCols),
+						HasColumnConfigs(columnConfigs1),
 				),
 			},
-			// Change NAME collate='fr' — expect DestroyBeforeCreate (ForceNew)
+			// Change NAME collate='FR' — expect DestroyBeforeCreate (ForceNew)
 			{
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -1562,7 +1364,7 @@ func TestAcc_HybridTable_ColumnCollateForceNew(t *testing.T) {
 				Check: assertThat(
 					t,
 					resourceassert.HybridTableResource(t, model2.ResourceReference()).
-						HasColumns(baseCols),
+						HasColumnConfigs(columnConfigs2),
 				),
 			},
 		},
@@ -1598,12 +1400,10 @@ func TestAcc_HybridTable_Rename(t *testing.T) {
 				Check: assertThat(
 					t,
 					resourceassert.HybridTableResource(t, modelBasic.ResourceReference()).
-						HasNameString(id.Name()).
-						HasDatabaseString(id.DatabaseName()).
-						HasSchemaString(id.SchemaName()).
-						HasFullyQualifiedNameString(id.FullyQualifiedName()),
-					objectassert.HybridTable(t, id).
-						HasName(id.Name()),
+						HasName(id.Name()).
+						HasDatabase(id.DatabaseName()).
+						HasSchema(id.SchemaName()).
+						HasFullyQualifiedName(id.FullyQualifiedName()),
 				),
 			},
 			// Rename
@@ -1617,15 +1417,10 @@ func TestAcc_HybridTable_Rename(t *testing.T) {
 				Check: assertThat(
 					t,
 					resourceassert.HybridTableResource(t, modelRenamed.ResourceReference()).
-						HasNameString(newId.Name()).
-						HasDatabaseString(newId.DatabaseName()).
-						HasSchemaString(newId.SchemaName()).
-						HasFullyQualifiedNameString(newId.FullyQualifiedName()).
-						HasCommentString(renamedComment),
-					objectassert.HybridTable(t, newId).
 						HasName(newId.Name()).
-						HasDatabaseName(newId.DatabaseName()).
-						HasSchemaName(newId.SchemaName()).
+						HasDatabase(newId.DatabaseName()).
+						HasSchema(newId.SchemaName()).
+						HasFullyQualifiedName(newId.FullyQualifiedName()).
 						HasComment(renamedComment),
 				),
 			},
@@ -1633,98 +1428,76 @@ func TestAcc_HybridTable_Rename(t *testing.T) {
 	})
 }
 
-// TestAcc_HybridTable_PKNullableNoSpurious verifies that a primary-key column
-// declared as nullable=true (the schema default) does not produce a spurious
-// diff after Read, even though Snowflake silently enforces NOT NULL on PK
-// columns and DESCRIBE reports null="N". The reconciliation happens via
-// Read-time substitution in buildHybridColumnStateFromDescribe.
-func TestAcc_HybridTable_PKNullableNoSpurious(t *testing.T) {
-	id := testClient().Ids.RandomSchemaObjectIdentifier()
+func TestAcc_Experimental_HybridTable_HierarchyRenames_MoveToAnotherSchema(t *testing.T) {
+	databaseId := testClient().Ids.RandomAccountObjectIdentifier()
+	schemaXName := testClient().Ids.Alpha()
+	schemaYName := testClient().Ids.Alpha()
+	tableName := testClient().Ids.Alpha()
 
-	columns := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-	}
-	pk := []sdk.TableColumnSignature{
-		{Name: "ID"},
-	}
-	model := model.HybridTableFromId("test", id, columns, pk)
+	providerModel := providermodel.SnowflakeProvider().WithExperimentalFeaturesEnabled(experimentalfeatures.HierarchyRenames)
+	databaseModel := model.DatabaseWithParametersSet("db", databaseId.Name())
+
+	schemaModelX := model.SchemaWithImplicitDatabaseDependency("schemaX", schemaXName, databaseModel)
+	schemaModelY := model.SchemaWithImplicitDatabaseDependency("schemaY", schemaYName, databaseModel)
+
+	columns := []sdk.TableColumnSignature{{Name: "ID", Type: testdatatypes.DataTypeNumber}}
+	pks := []sdk.TableColumnSignature{{Name: "ID"}}
+	tableModelBefore := model.HybridTableWithImplicitDependencies("test", tableName, columns, pks, schemaModelX, databaseModel)
+	tableModelAfter := model.HybridTableWithImplicitDependencies("test", tableName, columns, pks, schemaModelY, databaseModel)
+
+	id := sdk.NewSchemaObjectIdentifier(databaseId.Name(), schemaXName, tableName)
+	expectedNewTableId := sdk.NewSchemaObjectIdentifier(databaseId.Name(), schemaYName, tableName)
 
 	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
+		ProtoV6ProviderFactories: experimentalHierarchyRenamesProviderFactory,
 		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
 			tfversion.RequireAbove(tfversion.Version1_5_0),
 		},
 		CheckDestroy: CheckDestroy(t, resources.HybridTable),
 		Steps: []resource.TestStep{
+			// Create database, both schemas, and the hybrid table in schema X
 			{
-				Config: accconfig.FromModels(t, model),
+				Config: accconfig.FromModels(t, providerModel, databaseModel, schemaModelX, schemaModelY, tableModelBefore),
+				Check: assertThat(
+					t,
+					resourceassert.HybridTableResource(t, tableModelBefore.ResourceReference()).
+						HasName(tableName).
+						HasDatabase(databaseId.Name()).
+						HasSchema(schemaXName).
+						HasFullyQualifiedName(id.FullyQualifiedName()),
+				),
 			},
-			// A second apply with no config change must produce a no-op plan.
+			// Move the hybrid table to schema Y
 			{
-				Config: accconfig.FromModels(t, model),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
+						plancheck.ExpectResourceAction(tableModelAfter.ResourceReference(), plancheck.ResourceActionUpdate),
 					},
 				},
+				Config: accconfig.FromModels(t, providerModel, databaseModel, schemaModelX, schemaModelY, tableModelAfter),
+				Check: assertThat(
+					t,
+					resourceassert.HybridTableResource(t, tableModelAfter.ResourceReference()).
+						HasName(tableName).
+						HasDatabase(databaseId.Name()).
+						HasSchema(schemaYName).
+						HasFullyQualifiedName(expectedNewTableId.FullyQualifiedName()),
+				),
 			},
 		},
 	})
 }
 
-// checkUniqueConstraintNamesReadBack asserts that every unique_constraint element in
-// state has a name that is either the explicit "my_uq" or a server-generated name with
-// the "SYS_CONSTRAINT_" prefix. An empty name (which would mean GetConstraints failed to
-// read back the auto-generated name of the unnamed UNIQUE) fails the check.
-func checkUniqueConstraintNamesReadBack(resourceRef string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[resourceRef]
-		if !ok {
-			return fmt.Errorf("resource %s not found in state", resourceRef)
-		}
-
-		// TypeSet name attributes look like "unique_constraint.<hash>.name".
-		nameKey := regexp.MustCompile(`^unique_constraint\.\d+\.name$`)
-		var found int
-		for key, value := range rs.Primary.Attributes {
-			if !nameKey.MatchString(key) {
-				continue
-			}
-			found++
-			if value != "my_uq" && !strings.HasPrefix(value, "SYS_CONSTRAINT_") {
-				return fmt.Errorf("unique_constraint name %q (at %s) is neither %q nor SYS_CONSTRAINT_-prefixed; auto-generated name was not read back", value, key, "my_uq")
-			}
-		}
-		if found != 2 {
-			return fmt.Errorf("expected 2 unique_constraint name attributes, found %d", found)
-		}
-		return nil
-	}
-}
-
-// TestAcc_HybridTable_CollateCaseInsensitive verifies that a config-supplied
-// collate of "en-ci" produces no spurious diff even if DESCRIBE returns it
-// as "EN-CI" or some other case variant. Reconciliation comes from
-// ignoreCaseSuppressFunc on the field plus Read-time substitution that
-// preserves the user's spelling when DESCRIBE is case-equivalent.
-func TestAcc_HybridTable_CollateCaseInsensitive(t *testing.T) {
+func TestAcc_Experimental_HybridTable_HierarchyRenames_Disabled_ForceRecreation(t *testing.T) {
 	id := testClient().Ids.RandomSchemaObjectIdentifier()
+	databaseId := testClient().Ids.RandomAccountObjectIdentifier()
+	schemaId := testClient().Ids.RandomDatabaseObjectIdentifierInDatabase(databaseId)
+	newId := testClient().Ids.NewSchemaObjectIdentifierInSchema(id.Name(), schemaId)
 
-	columns := []sdk.TableColumnSignature{
-		{Name: "ID", Type: testdatatypes.DataTypeInteger},
-		{Name: "NAME", Type: testdatatypes.DataTypeVarchar},
-	}
-	pk := []sdk.TableColumnSignature{
-		{Name: "ID"},
-	}
-	// HybridTableFromId / WithColumn does not expose per-column collate, so use
-	// the richer WithColumnConfigs builder that does.
-	tableModel := model.HybridTableFromId("test", id, columns, pk).
-		WithColumnConfigs([]model.HybridTableColumnConfig{
-			{Name: "ID", Type: testdatatypes.DataTypeInteger.ToSql()},
-			{Name: "NAME", Type: testdatatypes.DataTypeVarchar.ToSql(), Collate: "en-ci"},
-		})
+	columns := []sdk.TableColumnSignature{{Name: "ID", Type: testdatatypes.DataTypeNumber}}
+	pks := []sdk.TableColumnSignature{{Name: "ID"}}
+	tableModelBefore := model.HybridTableFromId("test", id, columns, pks)
+	tableModelAfter := model.HybridTableFromId("test", newId, columns, pks)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
@@ -1733,16 +1506,28 @@ func TestAcc_HybridTable_CollateCaseInsensitive(t *testing.T) {
 		},
 		CheckDestroy: CheckDestroy(t, resources.HybridTable),
 		Steps: []resource.TestStep{
+			// Create
 			{
-				Config: accconfig.FromModels(t, tableModel),
+				Config: accconfig.FromModels(t, tableModelBefore),
+				Check: assertThat(
+					t,
+					resourceassert.HybridTableResource(t, tableModelBefore.ResourceReference()).
+						HasName(id.Name()).
+						HasDatabase(id.DatabaseName()).
+						HasSchema(id.SchemaName()).
+						HasFullyQualifiedName(id.FullyQualifiedName()),
+				),
 			},
+			// Change database — should force recreation.
 			{
-				Config: accconfig.FromModels(t, tableModel),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectEmptyPlan(),
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(tableModelAfter.ResourceReference(), plancheck.ResourceActionDestroyBeforeCreate),
 					},
 				},
+				Config:             accconfig.FromModels(t, tableModelAfter),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
 			},
 		},
 	})

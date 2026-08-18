@@ -17,7 +17,7 @@ import (
 // Use only parameters that can be set only on the account level for the time-being.
 // TODO [SNOW-1866453]: add more acc tests for the remaining parameters
 
-func TestAcc_AccountParameter(t *testing.T) {
+func TestAcc_AccountParameter_BasicUseCase(t *testing.T) {
 	testCases := []struct {
 		param        sdk.AccountParameter
 		value        string
@@ -36,16 +36,16 @@ func TestAcc_AccountParameter(t *testing.T) {
 		{sdk.AccountParameterDefaultStreamlitComputePool, "SYSTEM_COMPUTE_POOL_GPU", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterDisallowedSpcsWorkloadTypes, "", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterEnableBudgetEventLogging, "true", sdk.ParameterTypeSnowflakeDefault},
-		{sdk.AccountParameterCortexModelsAllowlist, "All", sdk.ParameterTypeSnowflakeDefault},
+		// TOOD(SNOW-3953840): Unskip or remove {sdk.AccountParameterCortexModelsAllowlist, "All", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterCortexCodeCliDailyEstCreditLimitPerUser, "10", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterCortexCodeDesktopDailyEstCreditLimitPerUser, "20", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterCortexCodeSnowsightDailyEstCreditLimitPerUser, "30", sdk.ParameterTypeSnowflakeDefault},
-		{sdk.AccountParameterEnableCortexAnalyst, "true", sdk.ParameterTypeSystem},
+		{sdk.AccountParameterEnableCortexAnalyst, "true", testClient().SnowflakeDefaults.DefaultEnableCortexAnalystLevel(t)},
 		{sdk.AccountParameterEnableDataCompaction, "true", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterEnablePerAccountAppServicePrivatelinkUrl, "true", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterEnableGetDdlUseDataTypeAlias, "false", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterEnableIcebergMergeOnRead, "true", sdk.ParameterTypeSnowflakeDefault},
-		{sdk.AccountParameterEnableNotebookCreationInPersonalDb, "false", sdk.ParameterTypeSystem},
+		{sdk.AccountParameterEnableNotebookCreationInPersonalDb, "false", testClient().SnowflakeDefaults.DefaultEnableNotebookCreationInPersonalDbLevel(t)},
 		{sdk.AccountParameterEnableSpcsBlockStorageSnowflakeFullEncryptionEnforcement, "false", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterEnableTagPropagationEventLogging, "false", sdk.ParameterTypeSnowflakeDefault},
 		{sdk.AccountParameterIcebergVersionDefault, "2", sdk.ParameterTypeSnowflakeDefault},

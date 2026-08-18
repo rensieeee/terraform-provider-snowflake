@@ -22,7 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 )
 
-func TestAcc_Warehouses_BaseUseCase_DifferentFiltering(t *testing.T) {
+func TestAcc_Warehouses_BasicUseCase_DifferentFiltering(t *testing.T) {
 	prefix := random.AlphaN(4)
 	idOne := testClient().Ids.RandomAccountObjectIdentifierWithPrefix(prefix)
 	idTwo := testClient().Ids.RandomAccountObjectIdentifierWithPrefix(prefix)
@@ -110,7 +110,7 @@ func TestAcc_Warehouses_CompleteUseCase(t *testing.T) {
 			HasOwnerNotEmpty().
 			HasComment(comment).
 			HasEnableQueryAcceleration(true).
-			HasQueryAccelerationMaxScaleFactor(2).
+			HasQueryAccelerationMaxScaleFactor(testClient().SnowflakeDefaults.DefaultQueryAccelerationMaxScaleFactor(t)).
 			HasResourceMonitorEmpty().
 			HasScalingPolicy(sdk.ScalingPolicyStandard).
 			HasOwnerRoleTypeNotEmpty().
@@ -158,7 +158,8 @@ func TestAcc_Warehouses_CompleteUseCase(t *testing.T) {
 					resourceparametersassert.WarehousesDatasourceParameters(t, warehousesModel.DatasourceReference()).
 						HasDefaultMaxConcurrencyLevel().
 						HasDefaultStatementQueuedTimeoutInSeconds().
-						HasDefaultStatementTimeoutInSeconds().
+						HasStatementTimeoutInSeconds(172800).
+						HasStatementTimeoutInSecondsLevel(testClient().SnowflakeDefaults.DefaultStatementTimeoutInSecondsLevel(t)).
 						HasDefaultFallbackWarehouse(),
 				),
 			},

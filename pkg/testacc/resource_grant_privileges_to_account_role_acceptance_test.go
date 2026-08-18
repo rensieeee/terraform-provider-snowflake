@@ -31,7 +31,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 )
 
-func TestAcc_GrantPrivilegesToAccountRole_OnAccount_BasicUseCase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnAccount(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -283,7 +283,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnAccount_ErrorOnPrivilegesNotGranted(
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnAccount_ChangeListOfPrivilegesToAllPrivileges(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_CompleteUseCase_PrivilegesToAllPrivileges(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -372,7 +372,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnAccount_PrivilegesReversed(t *testin
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnAccountObject_BasicUseCase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnAccountObject(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -607,7 +607,7 @@ func TestAcc_GrantPrivilegesToApplicationRole_OnAccountObject_InfinitePlan(t *te
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchema_BasicUseCase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnSchema(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -732,7 +732,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchema_ExactlyOneOf(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnAllSchemasInDatabase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnAllSchemasInDatabase(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -781,7 +781,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnAllSchemasInDatabase(t *testing.T) {
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnFutureSchemasInDatabase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnFutureSchemasInDatabase(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -830,7 +830,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnFutureSchemasInDatabase(t *testing.T
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnObject(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnSchemaObject_OnObject(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -882,7 +882,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnObject(t *testing.T) 
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnFunctionWithArguments(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnSchemaObject_OnFunctionWithArguments(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -927,6 +927,54 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnFunctionWithArguments
 				ConfigDirectory:   ConfigurationDirectory("TestAcc_GrantPrivilegesToAccountRole/OnSchemaObject_OnFunction"),
 				ConfigVariables:   configVariables,
 				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// proves https://github.com/snowflakedb/terraform-provider-snowflake/issues/5087 is fixed
+func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnDMFsWithTableArgument(t *testing.T) {
+	role, roleCleanup := testClient().Role.CreateRole(t)
+	t.Cleanup(roleCleanup)
+
+	function, functionCleanup := testClient().DataMetricFunctionClient.CreateWithArguments(
+		t,
+		[]string{"ARG_T TABLE(ARG_C DATE)"},
+		[]string{"TABLE(DATE)"},
+	)
+	t.Cleanup(functionCleanup)
+
+	roleId := role.ID()
+	privilege := string(sdk.SchemaObjectPrivilegeUsage)
+	resourceModel := model.GrantPrivilegesToAccountRole("test", roleId.FullyQualifiedName()).
+		WithPrivileges(privilege).
+		WithOnSchemaObjectObject(sdk.ObjectTypeFunction, function.FullyQualifiedName()).
+		WithWithGrantOption(false)
+	ref := resourceModel.ResourceReference()
+
+	assertions := resourceassert.GrantPrivilegesToAccountRoleResource(t, ref).
+		HasAccountRoleName(roleId.FullyQualifiedName()).
+		HasPrivileges(privilege).
+		HasWithGrantOption(false).
+		HasOnSchemaObjectObject(sdk.ObjectTypeFunction, function.FullyQualifiedName()).
+		HasResourceId(fmt.Sprintf("%s|false|false|USAGE|OnSchemaObject|OnObject|FUNCTION|%s", roleId.FullyQualifiedName(), function.FullyQualifiedName()))
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: TestAccProtoV6ProviderFactories,
+		TerraformVersionChecks: []tfversion.TerraformVersionCheck{
+			tfversion.RequireAbove(tfversion.Version1_5_0),
+		},
+		CheckDestroy: CheckAccountRolePrivilegesRevoked(t),
+		Steps: []resource.TestStep{
+			{
+				Config: accconfig.FromModels(t, resourceModel),
+				Check:  assertThat(t, assertions),
+			},
+			{
+				Config:            accconfig.FromModels(t, resourceModel),
+				ResourceName:      ref,
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -1003,7 +1051,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnObject_OwnershipPrivi
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnAll_InDatabase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnSchemaObject_OnAll_InDatabase(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -1055,7 +1103,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnAll_InDatabase(t *tes
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnAllPipes(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_CompleteUseCase_OnSchemaObject_OnAllPipes(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -1104,7 +1152,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnAllPipes(t *testing.T
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_OnFuture_InDatabase(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnSchemaObject_OnFuture_InDatabase(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -1260,7 +1308,7 @@ func accountRoleHasInheritedGrant(t *testing.T, roleId sdk.AccountObjectIdentifi
 	}
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnAccountObject_Inherited(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_BasicUseCase_OnAccountObject_Inherited(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -1632,7 +1680,7 @@ func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_Inherited_InSchema(t *t
 	})
 }
 
-func TestAcc_GrantPrivilegesToAccountRole_OnSchemaObject_Inherited_ContainerChange(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_CompleteUseCase_Inherited_ContainerChange(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 
@@ -2437,7 +2485,7 @@ func TestAcc_GrantPrivilegesToAccountRole_MLPrivileges(t *testing.T) {
 }
 
 // proves https://github.com/Snowflake-Labs/terraform-provider-snowflake/issues/2459 is fixed
-func TestAcc_GrantPrivilegesToAccountRole_ChangeWithGrantOptionsOutsideOfTerraform_WithGrantOptions(t *testing.T) {
+func TestAcc_GrantPrivilegesToAccountRole_CompleteUseCase_ReconcileExternalWithGrantOption(t *testing.T) {
 	role, roleCleanup := testClient().Role.CreateRole(t)
 	t.Cleanup(roleCleanup)
 

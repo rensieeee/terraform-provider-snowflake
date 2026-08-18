@@ -26,6 +26,90 @@ for changes required after enabling given [Snowflake BCR Bundle](https://docs.sn
 
 ## v2.19.x ➞ v2.20.0
 
+### *(new feature)* tfc_workload_identity_token_tag provider field
+
+A new optional `tfc_workload_identity_token_tag` provider field has been added for use with the OIDC
+workload identity flow. Terraform Cloud/Enterprise exposes manually generated workload identity tokens
+through environment variables named `TFC_WORKLOAD_IDENTITY_TOKEN_<TAG>`; setting this field to the tag
+makes the provider read the JWT from the matching variable and use it as the workload identity token:
+
+```terraform
+provider "snowflake" {
+  organization_name               = "<organization_name>"
+  account_name                    = "<account_name>"
+  user                            = "<user_name>"
+  authenticator                   = "WORKLOAD_IDENTITY"
+  workload_identity_provider      = "OIDC"
+  tfc_workload_identity_token_tag = "SNOWFLAKE"
+}
+```
+
+This removes the need for an external data source or a wrapper script, and allows backing the plan and
+the apply phase with different Snowflake identities based on the TFC/TFE token claims.
+
+The field requires `authenticator = "WORKLOAD_IDENTITY"` and `workload_identity_provider = "OIDC"`;
+other combinations are rejected with an error. The resolved token takes precedence over every other
+token source, including the `token` field, `SNOWFLAKE_TOKEN`, and a TOML profile. The tag can also be
+sourced from `SNOWFLAKE_TFC_WORKLOAD_IDENTITY_TOKEN_TAG`. The untagged `TFC_WORKLOAD_IDENTITY_TOKEN`
+variable is not read.
+
+Leaving the field unset keeps the existing authentication behavior unchanged. See the
+[authentication methods guide](https://registry.terraform.io/providers/snowflakedb/snowflake/latest/docs/guides/authentication_methods)
+for details.
+
+### *(new feature)* ACCOUNT_ROLE_SHOW_CACHING experiment
+
+A new `ACCOUNT_ROLE_SHOW_CACHING` experiment has been added. When enabled, the result of looking up
+an account role by identifier (`SHOW ROLES LIKE '<name>'`, via the underlying `ShowByID`/
+`ShowByIDSafely` calls) is cached in memory for the duration of a single plan or apply cycle, so
+multiple resource instances referencing the same role share one round trip instead of each issuing
+their own.
+
+Currently supported by: `snowflake_account_role`, `snowflake_grant_application_role`,
+`snowflake_grant_privileges_to_account_role`.
+
+Without caching, every lookup of a given role — the role's own `snowflake_account_role` Read, or an
+existence check performed by a grant resource before granting to/from it — issues an independent
+round trip, even when many resource instances reference the same role. The cache is invalidated on
+`snowflake_account_role` Update (rename or comment change) and Delete, since only that resource can
+change what a cached lookup would return.
+
+This is a separate, independent flag from `GRANT_ACCOUNT_ROLE_SHOW_CACHING`: it does **not** affect
+`snowflake_grant_account_role`'s `SHOW GRANTS OF ROLE` caching, and both can be enabled together.
+
+To enable, add `ACCOUNT_ROLE_SHOW_CACHING` to the `experimental_features_enabled` field in the
+provider configuration:
+
+```hcl
+provider "snowflake" {
+  experimental_features_enabled = ["ACCOUNT_ROLE_SHOW_CACHING"]
+}
+```
+
+No changes to existing configurations are required. The experiment is intended for large
+configurations (thousands of role or grant resources) where plan and apply time is dominated by
+redundant role lookups.
+
+### *(new feature)* GRANTS_SHOW_CACHING experiment
+
+A new `GRANTS_SHOW_CACHING` experiment has been added. When enabled, the provider caches `SHOW GRANTS` results (both `SHOW GRANTS ON <object>` and `SHOW FUTURE GRANTS IN <container>`) in memory for the duration of a single plan or apply cycle, so multiple resource instances resolving to the same underlying SHOW statement share one round-trip instead of each issuing their own.
+
+Currently supported by: `snowflake_grant_privileges_to_account_role`, `snowflake_grant_ownership`.
+
+Without caching, every resource instance issues an independent SHOW GRANTS call during Read. In configurations where many grant resources resolve to the same underlying SHOW statement (e.g. many privilege grants on the same schema, or many future-grant roles on the same database), this produces N identical round-trips that each return the same full result set — only 1 is needed per unique statement per plan.
+
+When enabled, the first Read for a given SHOW statement fetches and caches the result; subsequent Reads in the same plan reuse it. The cache is invalidated on Create, Update, and Delete of the resources listed above, and additionally on any grant/revoke/ownership-transfer performed by `snowflake_grant_privileges_to_database_role` and `snowflake_grant_privileges_to_share` that could affect the same object, so mutations within a single apply remain correctly visible to subsequent Reads. As with any cache, a mutation to the same object made *outside* this apply cycle (by another concurrent Terraform run, or a resource type not listed above) is not tracked and cannot invalidate an already-cached entry; this is a pre-existing limitation of the caching model introduced by `GRANT_ACCOUNT_ROLE_SHOW_CACHING` in v2.18.0, not something new to this experiment.
+
+To enable, add `GRANTS_SHOW_CACHING` to the `experimental_features_enabled` field in the provider configuration:
+
+```hcl
+provider "snowflake" {
+  experimental_features_enabled = ["GRANTS_SHOW_CACHING"]
+}
+```
+
+This is a separate, independent flag from `GRANT_ACCOUNT_ROLE_SHOW_CACHING`: it does **not** replace that experiment, does not affect `snowflake_grant_account_role`'s caching behavior, and both can be enabled together. No changes to existing configurations are required. The experiment is intended for large configurations (thousands of grant resources) where plan and apply time is dominated by redundant `SHOW GRANTS` calls.
+
 ### *(new feature)* New external access integration resource and data source
 
 #### Resource
@@ -42,6 +126,23 @@ This feature will be marked as stable in future releases. To use it, add `snowfl
 
 No changes are required for existing configurations unless you want to adopt any of these preview features with Terraform.
 
+### *(new feature)* `for_all_person_users` and `for_all_service_users` in account policy attachments
+
+Both `snowflake_account_authentication_policy_attachment` and `snowflake_account_session_policy_attachment` now support attaching a policy to a specific user type via two new mutually-exclusive boolean fields:
+
+- `for_all_person_users` – attaches the policy with `FOR ALL PERSON USERS`.
+- `for_all_service_users` – attaches the policy with `FOR ALL SERVICE USERS`.
+
+No configuration changes are needed unless you want to attach a policy to a specific user type. When neither field is set (the default), the policy is attached account-wide, exactly as before. A single account can have one attachment per scope (account-wide, person users, and service users) of the same policy kind at the same time, each managed by a separate resource instance.
+
+### *(new feature)* `ADAPTIVE` refresh mode for dynamic tables
+
+The `snowflake_dynamic_table` resource now accepts [`ADAPTIVE`](https://docs.snowflake.com/en/release-notes/2026/other/2026-07-30-dynamic-tables-adaptive-refresh-mode-ga) as a valid value for `refresh_mode` option.
+
+No changes in configuration are required unless you want to start using `refresh_mode = "ADAPTIVE"`.
+
+Reference: [#5097](https://github.com/snowflakedb/terraform-provider-snowflake/issues/5097)
+
 ### *(improvement)* `created_on` format in network policies' and listings' `show_output`
 
 `created_on` in the internal network policy and listing representations was a raw string; it is now read as a proper timestamp, making both consistent with databases, warehouses, schemas, shares, resource monitors, connections, and compute pools, which all already exposed it that way.
@@ -55,14 +156,26 @@ As a result, the value of `show_output.0.created_on` is now rendered in Go's tim
 
 No configuration changes are required. Adjust only if you reference `show_output.0.created_on` and depend on its exact textual format.
 
-### *(new feature)* `for_all_person_users` and `for_all_service_users` in account policy attachments
+### *(bug fix)* Grant resources and grants data source: support `TABLE(<type>)` data metric function arguments
 
-Both `snowflake_account_authentication_policy_attachment` and `snowflake_account_session_policy_attachment` now support attaching a policy to a specific user type via two new mutually-exclusive boolean fields:
+Previously, managing grants on data metric functions whose signature uses the abbreviated `TABLE(<type>)` form (for example, `"SNOWFLAKE"."CORE"."ACCEPTED_VALUES"(TABLE(DATE))`) caused a provider panic like this
+```
+Stack trace from the terraform-provider-snowflake_v2.19.0 plugin:
 
-- `for_all_person_users` – attaches the policy with `FOR ALL PERSON USERS`.
-- `for_all_service_users` – attaches the policy with `FOR ALL SERVICE USERS`.
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x2 addr=0x0 pc=0x1050294dc]
 
-No configuration changes are needed unless you want to attach a policy to a specific user type. When neither field is set (the default), the policy is attached account-wide, exactly as before. A single account can have one attachment per scope (account-wide, person users, and service users) of the same policy kind at the same time, each managed by a separate resource instance.
+goroutine 286 [running]:
+github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/sdk/datatypes.(*TableDataType).ToLegacyDataTypeSql(0x5454dccfaae0?)
+github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/sdk/datatypes/table.go:42 +0x1c
+```
+
+This has been fixed: the provider now correctly parses and serializes the abbreviated `TABLE(<type>)` signature in function identifiers.
+
+No changes are required for existing configurations.
+
+References: [#5087](https://github.com/snowflakedb/terraform-provider-snowflake/issues/5087)
+
 
 ### *(bug fix)* Deprecation warning raised for `skip_toml_file_permission_verification` that was not set
 
@@ -137,6 +250,22 @@ Previously, reading an Iceberg table with the `snowflake_iceberg_table` and othe
 Now, a column type that cannot be parsed no longer fails the whole describe call; the provider falls back to the raw type string reported by Snowflake for that column. No changes in configuration are required.
 
 References: [#5090](https://github.com/snowflakedb/terraform-provider-snowflake/issues/5090)
+
+### *(bug fix)* Fixed handling of unprefixed database role grantee names in `SHOW GRANTS` (2026_06 bundle / BCR-2371)
+
+Previously, when a database role was granted to another database role, the provider expected the `SHOW GRANTS OF DATABASE ROLE` output to return the grantee database role as a fully qualified name (`<database>.<database_role>`). The 2026_06 bundle (BCR-2371) changes this output so that the grantee database role is returned without the database prefix (just `<database_role>`). With the bundle enabled, the provider could not parse the grantee name, so the Read operation of the `snowflake_grant_database_role` resource failed to find the grant and marked the resource as deleted. `terraform plan` then showed a permanent diff recreating the grant, and `terraform apply` returned an error like
+
+```
+│ Error: Provider produced inconsistent result after apply
+│
+│ When applying changes to snowflake_grant_database_role.example, provider "provider[\"registry.terraform.io/snowflakedb/snowflake\"]" produced an unexpected new value: Root object was present, but now absent.
+│
+│ This is a bug in the provider, which should be reported in the provider's own issue tracker.
+```
+
+Importing such a resource failed for the same reason (`Cannot import non-existent remote object`).
+
+In this release, the grantee database role name is normalized to a fully qualified identifier regardless of whether the bundle is enabled: when the database prefix is missing, it is reconstructed from the database of the queried database role (a database role can only be granted to another database role in the same database). The `snowflake_grant_database_role` resource is no longer recreated on every plan and can be imported again.
 
 ## v2.18.x ➞ v2.19.0
 

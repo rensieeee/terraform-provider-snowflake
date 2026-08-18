@@ -2514,6 +2514,36 @@ func TestInt_ShowGrants(t *testing.T) {
 		assert.Equal(t, testClientHelper().Ids.SnowflakeApplicationId().Name(), grants[0].GranteeName.Name())
 	})
 
+	t.Run("grantee name of a database role granted to another database role is fully qualified", func(t *testing.T) {
+		// Regression test for the 2026_06 bundle (BCR-2371): SHOW GRANTS OF DATABASE ROLE returns the
+		// grantee database role without the database prefix. The grantee identifier must stay fully
+		// qualified regardless of whether the bundle is enabled, otherwise the grant_database_role
+		// resource cannot match the grant on read/import and is perpetually recreated.
+		// A database role can only be granted to another database role in the same database, so the child
+		// and parent roles are created in the same database (CreateDatabaseRole uses the same one).
+		// Note: on a bundle-off account this passes with or without the fix (the grantee is returned
+		// prefixed); the authoritative regression that toggles the 2026_06 bundle is the account-level
+		// acceptance test TestAcc_GrantDatabaseRole_bcr2026_06_databaseRoleGrantee.
+		childRole, childRoleCleanup := testClientHelper().DatabaseRole.CreateDatabaseRole(t)
+		t.Cleanup(childRoleCleanup)
+
+		parentRole, parentRoleCleanup := testClientHelper().DatabaseRole.CreateDatabaseRole(t)
+		t.Cleanup(parentRoleCleanup)
+
+		err := client.DatabaseRoles.Grant(ctx, sdk.NewGrantDatabaseRoleRequest(childRole.ID()).WithDatabaseRole(parentRole.ID()))
+		require.NoError(t, err)
+
+		grants, err := client.Grants.Show(ctx, &sdk.ShowGrantOptions{
+			Of: &sdk.ShowGrantsOf{
+				DatabaseRole: childRole.ID(),
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, grants, 1)
+		assert.Equal(t, sdk.ObjectTypeDatabaseRole, grants[0].GrantedTo)
+		assert.Equal(t, parentRole.ID().FullyQualifiedName(), grants[0].GranteeName.FullyQualifiedName())
+	})
+
 	t.Run("show inherited grants in database", func(t *testing.T) {
 		database, databaseCleanup := testClientHelper().Database.CreateDatabase(t)
 		t.Cleanup(databaseCleanup)
@@ -2554,6 +2584,47 @@ func TestInt_ShowGrants(t *testing.T) {
 		assert.Equal(t, database.ID().Name(), *grant.InheritedFromDatabase)
 		assert.Nil(t, grant.InheritedFromSchema)
 	})
+}
+
+// proves https://github.com/snowflakedb/terraform-provider-snowflake/issues/5087 is fixed
+func TestInt_ShowGrants_DMFsWithTableArgument(t *testing.T) {
+	client := testClient(t)
+	ctx := testContext(t)
+
+	role, roleCleanup := testClientHelper().Role.CreateRole(t)
+	t.Cleanup(roleCleanup)
+
+	functionId, functionCleanup := testClientHelper().DataMetricFunctionClient.CreateWithArguments(
+		t,
+		[]string{"ARG_T TABLE(ARG_C DATE)"},
+		[]string{"TABLE(DATE)"},
+	)
+	t.Cleanup(functionCleanup)
+
+	err := client.Grants.GrantPrivilegesToAccountRole(ctx, &sdk.AccountRoleGrantPrivileges{
+		SchemaObjectPrivileges: []sdk.SchemaObjectPrivilege{sdk.SchemaObjectPrivilegeUsage},
+	}, &sdk.AccountRoleGrantOn{
+		SchemaObject: &sdk.GrantOnSchemaObject{
+			SchemaObject: &sdk.Object{
+				ObjectType: sdk.ObjectTypeFunction,
+				Name:       functionId,
+			},
+		},
+	}, role.ID(), nil)
+	require.NoError(t, err)
+
+	grants, err := client.Grants.Show(ctx, &sdk.ShowGrantOptions{
+		To: &sdk.ShowGrantsTo{
+			Role: role.ID(),
+		},
+	})
+	require.NoError(t, err)
+
+	functionGrant, err := collections.FindFirst[sdk.Grant](grants, func(g sdk.Grant) bool {
+		return g.Privilege == sdk.SchemaObjectPrivilegeUsage.String() && g.GrantedOn == sdk.ObjectTypeFunction
+	})
+	require.NoError(t, err)
+	assert.Contains(t, functionGrant.Name.FullyQualifiedName(), "TABLE(DATE)")
 }
 
 func TestInt_GrantAndRevokeInheritedPrivilegesToAccountRole(t *testing.T) {

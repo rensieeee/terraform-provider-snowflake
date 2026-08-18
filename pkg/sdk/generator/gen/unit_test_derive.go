@@ -5,10 +5,17 @@ import (
 	"strings"
 )
 
+// objectIdentifierFallbackKind stands in for the generic ObjectIdentifier interface kind: any
+// concrete kind works, since ValidObjectIdentifier only checks Name() != "".
+const objectIdentifierFallbackKind = "AccountObjectIdentifier"
+
 // emptyIdentifierVar returns the pkg/sdk test-only variable name for an empty (invalid) identifier of the given kind,
 // following the convention empty<Kind> (e.g. "emptySchemaObjectIdentifier").
 // The corresponding vars are declared in pkg/sdk/random_test.go.
 func emptyIdentifierVar(kind string) string {
+	if kind == "ObjectIdentifier" {
+		kind = objectIdentifierFallbackKind
+	}
 	return "empty" + kind
 }
 
@@ -95,11 +102,10 @@ func primeAncestors(target *Field) []string {
 	for _, ancestor := range target.AncestorsFromRoot() {
 		switch {
 		case ancestor.IsPointer():
-			stmts = append(stmts, fmt.Sprintf("opts%s = &%s{}", ancestor.Path(), ancestor.KindNoPtr()))
+			stmts = append(stmts, fmt.Sprintf("opts%s = &%s{}", ancestor.IndexedPath(), ancestor.KindNoPtr()))
 		case ancestor.IsSlice():
-			// Best-effort single empty element.
-			// No current definition nests a validation two levels inside a slice, so per-element priming beyond this is out of scope.
-			stmts = append(stmts, fmt.Sprintf("opts%s = []%s{{}}", ancestor.Path(), ancestor.KindNoPtr()))
+			// Best-effort single empty element; deeper nesting through indexed path.
+			stmts = append(stmts, fmt.Sprintf("opts%s = []%s{{}}", ancestor.IndexedPath(), ancestor.KindNoPtr()))
 		}
 	}
 	return stmts
