@@ -3,11 +3,9 @@ package resourceassert
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/acceptance/bettertestspoc/config/model"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/sdk"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func (h *HybridTableResourceAssert) HasColumns(columns []sdk.TableColumnSignature) *HybridTableResourceAssert {
@@ -73,8 +71,8 @@ func (h *HybridTableResourceAssert) HasUniqueConstraints(constraints ...model.Hy
 		attrs := map[string]string{
 			"columns.#": strconv.Itoa(len(uc.Columns)),
 		}
-		if uc.Name != "" {
-			attrs["name"] = uc.Name
+		if uc.Name != nil {
+			attrs["name"] = *uc.Name
 		}
 		for i, col := range uc.Columns {
 			attrs[fmt.Sprintf("columns.%d", i)] = col
@@ -92,8 +90,8 @@ func (h *HybridTableResourceAssert) HasForeignKeyConstraints(constraints ...mode
 			"table_name":    fk.TableName,
 			"ref_columns.#": strconv.Itoa(len(fk.RefColumns)),
 		}
-		if fk.Name != "" {
-			attrs["name"] = fk.Name
+		if fk.Name != nil {
+			attrs["name"] = *fk.Name
 		}
 		for i, col := range fk.Columns {
 			attrs[fmt.Sprintf("columns.%d", i)] = col
@@ -117,11 +115,10 @@ func (h *HybridTableResourceAssert) HasIndexes(indexes ...model.HybridTableIndex
 		for i, col := range idx.Columns {
 			attrs[fmt.Sprintf("columns.%d", i)] = col
 		}
-		for _, col := range idx.IncludeColumns {
-			// Nested TypeSet keys are hashes; match the resource's include_columns Set func.
-			attrs[fmt.Sprintf("include_columns.%d", schema.HashString(strings.ToUpper(col)))] = col
-		}
 		h.SetContainsElemNested("index", attrs)
+		for _, col := range idx.IncludeColumns {
+			h.SetContainsElem("index.*.include_columns", col)
+		}
 	}
 	return h
 }

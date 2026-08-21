@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/helpers"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/internal/collections"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/internal/provider"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/provider/experimentalfeatures"
+	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/provider/previewfeatures"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/provider/resources"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/schemas"
 	"github.com/Snowflake-Labs/terraform-provider-snowflake/pkg/sdk"
@@ -19,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/customdiff"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 var hybridTableSchema = map[string]*schema.Schema{
@@ -129,11 +132,12 @@ var hybridTableSchema = map[string]*schema.Schema{
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				"name": {
-					Type:        schema.TypeString,
-					Optional:    true,
-					Computed:    true,
-					ForceNew:    true,
-					Description: "Name of the constraint.",
+					Type:             schema.TypeString,
+					Optional:         true,
+					ForceNew:         true,
+					DiffSuppressFunc: IgnoreChangeToCurrentSnowflakeConstraintName(sdk.ColumnConstraintTypePrimaryKey),
+					ValidateFunc:     validation.StringIsNotEmpty,
+					Description:      "Name of the constraint.",
 				},
 				"columns": {
 					Type:        schema.TypeList,
@@ -155,11 +159,12 @@ var hybridTableSchema = map[string]*schema.Schema{
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				"name": {
-					Type:        schema.TypeString,
-					Optional:    true,
-					Computed:    true,
-					ForceNew:    true,
-					Description: "Name of the constraint.",
+					Type:             schema.TypeString,
+					Optional:         true,
+					ForceNew:         true,
+					DiffSuppressFunc: IgnoreChangeToCurrentSnowflakeConstraintName(sdk.ColumnConstraintTypeUnique),
+					ValidateFunc:     validation.StringIsNotEmpty,
+					Description:      "Name of the constraint.",
 				},
 				"columns": {
 					Type:        schema.TypeList,
@@ -181,11 +186,12 @@ var hybridTableSchema = map[string]*schema.Schema{
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
 				"name": {
-					Type:        schema.TypeString,
-					Optional:    true,
-					Computed:    true,
-					ForceNew:    true,
-					Description: "Name of the constraint.",
+					Type:             schema.TypeString,
+					Optional:         true,
+					ForceNew:         true,
+					DiffSuppressFunc: IgnoreChangeToCurrentSnowflakeConstraintName(sdk.ColumnConstraintTypeForeignKey),
+					ValidateFunc:     validation.StringIsNotEmpty,
+					Description:      "Name of the constraint.",
 				},
 				"columns": {
 					Type:        schema.TypeList,
@@ -218,7 +224,6 @@ var hybridTableSchema = map[string]*schema.Schema{
 		Type:        schema.TypeSet,
 		Optional:    true,
 		ForceNew:    true,
-		Set:         indexHash,
 		Description: "Defines secondary indexes on the hybrid table.",
 		Elem: &schema.Resource{
 			Schema: map[string]*schema.Schema{
@@ -233,15 +238,14 @@ var hybridTableSchema = map[string]*schema.Schema{
 					Required:    true,
 					ForceNew:    true,
 					MinItems:    1,
-					Elem:        &schema.Schema{Type: schema.TypeString, DiffSuppressFunc: ignoreCaseSuppressFunc},
+					Elem:        &schema.Schema{Type: schema.TypeString},
 					Description: "Index key columns, in order. Order is semantically meaningful.",
 				},
 				"include_columns": {
 					Type:        schema.TypeSet,
 					Optional:    true,
 					ForceNew:    true,
-					Set:         indexIncludeColumnsHash,
-					Elem:        &schema.Schema{Type: schema.TypeString, DiffSuppressFunc: ignoreCaseSuppressFunc},
+					Elem:        &schema.Schema{Type: schema.TypeString},
 					Description: "Columns included in the index payload via INCLUDE (...). Order carries no meaning.",
 				},
 			},
@@ -264,6 +268,15 @@ var hybridTableSchema = map[string]*schema.Schema{
 			Schema: schemas.DescribeHybridTableSchema,
 		},
 	},
+	ShowKeysOutputAttributeName: {
+		Type:     schema.TypeList,
+		Computed: true,
+		Description: joinWithSpace("Outputs the result of `SHOW PRIMARY KEYS`, `SHOW UNIQUE KEYS`, and `SHOW IMPORTED KEYS` for the given hybrid table, merged and grouped by constraint name and ordered by kind, then by column names.",
+			"The `referenced_table`, `referenced_columns`, `delete_rule`, and `update_rule` fields are populated for FOREIGN KEY constraints only."),
+		Elem: &schema.Resource{
+			Schema: schemas.ShowHybridTableConstraintSchema,
+		},
+	},
 }
 
 func HybridTable() *schema.Resource {
@@ -274,11 +287,10 @@ func HybridTable() *schema.Resource {
 		},
 	)
 	return &schema.Resource{
-		// TODO(SNOW-3637521): Add PreviewFeatureCreateContextWrapper when the hybrid table resource is moved to the production provider.
-		CreateContext: TrackingCreateWrapper(resources.HybridTable, CreateHybridTable),
-		ReadContext:   TrackingReadWrapper(resources.HybridTable, GetReadHybridTableFunc(true)),
-		UpdateContext: TrackingUpdateWrapper(resources.HybridTable, UpdateHybridTable),
-		DeleteContext: TrackingDeleteWrapper(resources.HybridTable, deleteFunc),
+		CreateContext: PreviewFeatureCreateContextWrapper(string(previewfeatures.HybridTableResource), TrackingCreateWrapper(resources.HybridTable, CreateHybridTable)),
+		ReadContext:   PreviewFeatureReadContextWrapper(string(previewfeatures.HybridTableResource), TrackingReadWrapper(resources.HybridTable, GetReadHybridTableFunc(true))),
+		UpdateContext: PreviewFeatureUpdateContextWrapper(string(previewfeatures.HybridTableResource), TrackingUpdateWrapper(resources.HybridTable, UpdateHybridTable)),
+		DeleteContext: PreviewFeatureDeleteContextWrapper(string(previewfeatures.HybridTableResource), TrackingDeleteWrapper(resources.HybridTable, deleteFunc)),
 		Description:   "Resource used to manage hybrid tables. For more information, check [hybrid tables documentation](https://docs.snowflake.com/en/sql-reference/sql/create-hybrid-table).",
 
 		CustomizeDiff: TrackingCustomDiffWrapper(resources.HybridTable, customdiff.All(
@@ -295,11 +307,33 @@ func HybridTable() *schema.Resource {
 
 		Schema: collections.MergeMaps(hybridTableSchema, hybridTableParametersSchema),
 		Importer: &schema.ResourceImporter{
-			StateContext: TrackingImportWrapper(resources.HybridTable, ImportName[sdk.SchemaObjectIdentifier]),
+			StateContext: TrackingImportWrapper(resources.HybridTable, ImportHybridTable),
 		},
 
 		Timeouts: defaultTimeouts,
 	}
+}
+
+func ImportHybridTable(ctx context.Context, d *schema.ResourceData, meta any) ([]*schema.ResourceData, error) {
+	if _, err := ImportName[sdk.SchemaObjectIdentifier](ctx, d, meta); err != nil {
+		return nil, err
+	}
+
+	client := meta.(*provider.Context).Client
+	id, err := sdk.ParseSchemaObjectIdentifier(d.Id())
+	if err != nil {
+		return nil, err
+	}
+
+	constraints, err := client.HybridTables.GetConstraints(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("reading hybrid table constraints: %w", err)
+	}
+	if err := setHybridTableConstraintBlocks(d, constraints); err != nil {
+		return nil, err
+	}
+
+	return []*schema.ResourceData{d}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -343,46 +377,84 @@ func foreignKeyHash(v any) int {
 	return schema.HashString(b.String())
 }
 
-// indexIncludeColumnsHash hashes a single include_columns string (uppercased) so
-// that a lowercase config value and its uppercase SHOW INDEXES read-back land in
-// the same set bucket. Used as the Set function for the include_columns TypeSet.
-func indexIncludeColumnsHash(v any) int {
-	return schema.HashString(strings.ToUpper(v.(string)))
+// ---------------------------------------------------------------------------
+// Constraint name diff suppression
+// ---------------------------------------------------------------------------
+
+// IgnoreChangeToCurrentSnowflakeConstraintName suppresses a diff on a constraint `name` in two
+// situations:
+//   - the configuration does not set a name, which means the user leaves the choice to Snowflake,
+//   - the configured name is the one Snowflake already reports for that constraint in
+//     `show_keys_output`.
+//
+// The flat helpers (e.g. IgnoreChangeToCurrentSnowflakeValueInDescribe) cannot be reused:
+// `show_keys_output` holds one entry per constraint, so the matching entry has to be located by
+// kind and columns rather than by a single key lookup.
+func IgnoreChangeToCurrentSnowflakeConstraintName(kind sdk.ColumnConstraintType) schema.SchemaDiffSuppressFunc {
+	return func(k, _, new string, d *schema.ResourceData) bool {
+		if d.Id() == "" {
+			return false
+		}
+		if new == "" {
+			log.Printf("[DEBUG] IgnoreChangeToCurrentSnowflakeConstraintName: no name is set for key %s, suppressing the difference", k)
+			return true
+		}
+
+		columns := hybridTableConstraintColumnsFromDiffKey(k, d)
+		if len(columns) == 0 {
+			return false
+		}
+
+		currentName, ok := findHybridTableConstraintName(d.Get(ShowKeysOutputAttributeName), kind, columns)
+		if !ok {
+			return false
+		}
+		if new == currentName {
+			log.Printf("[DEBUG] IgnoreChangeToCurrentSnowflakeConstraintName: new value for key %s is the same as the current Snowflake constraint name, suppressing the difference", k)
+			return true
+		}
+		log.Printf("[DEBUG] IgnoreChangeToCurrentSnowflakeConstraintName: new value for key %s is different from the current Snowflake constraint name, proceeding with plan", k)
+		return false
+	}
 }
 
-// indexHash hashes an index set element on its stable identity: the user-supplied
-// name plus the index columns and include columns, with column names uppercased.
-// Uppercasing is required because SHOW INDEXES returns uppercase column names while
-// a config may use any case; the TypeSet element identity is resolved via this hash
-// before DiffSuppressFunc runs, so without normalization a lowercase config element
-// and its uppercase read-back would hash differently and churn the set (spurious
-// ForceNew). name is included verbatim — it is user-supplied and round-trips exactly
-// (no server auto-naming, unlike the constraint blocks).
-func indexHash(v any) int {
-	m := v.(map[string]any)
-	var b strings.Builder
-	b.WriteString(m["name"].(string))
-	b.WriteByte('|')
-	for _, col := range m["columns"].([]any) {
-		b.WriteString(strings.ToUpper(col.(string)))
-		b.WriteByte(',')
+// hybridTableConstraintColumnsFromDiffKey reads the columns of the constraint block
+// addressed by a diff key like `unique_constraint.1234567.name`.
+func hybridTableConstraintColumnsFromDiffKey(k string, d *schema.ResourceData) []string {
+	columnsKey, found := strings.CutSuffix(k, ".name")
+	if !found {
+		return nil
 	}
-	b.WriteByte('|')
-	if inc, ok := m["include_columns"]; ok && inc != nil {
-		incSet, ok := inc.(*schema.Set)
-		if ok {
-			incCols := make([]string, 0, incSet.Len())
-			for _, c := range incSet.List() {
-				incCols = append(incCols, strings.ToUpper(c.(string)))
-			}
-			sort.Strings(incCols)
-			for _, c := range incCols {
-				b.WriteString(c)
-				b.WriteByte(',')
-			}
+	rawColumns, ok := d.Get(columnsKey + ".columns").([]any)
+	if !ok {
+		return nil
+	}
+	return expandStringList(rawColumns)
+}
+
+// findHybridTableConstraintName returns the name of the constraint of the given kind whose
+// columns match exactly (order- and case-sensitive).
+func findHybridTableConstraintName(rawConstraints any, kind sdk.ColumnConstraintType, columns []string) (string, bool) {
+	constraints, ok := rawConstraints.([]any)
+	if !ok {
+		return "", false
+	}
+	for _, rawConstraint := range constraints {
+		constraint, ok := rawConstraint.(map[string]any)
+		if !ok {
+			continue
 		}
+		if constraintKind, ok := constraint["kind"].(string); !ok || constraintKind != string(kind) {
+			continue
+		}
+		constraintColumns, ok := constraint["columns"].([]any)
+		if !ok || !slices.Equal(expandStringList(constraintColumns), columns) {
+			continue
+		}
+		name, ok := constraint["name"].(string)
+		return name, ok
 	}
-	return schema.HashString(b.String())
+	return "", false
 }
 
 // ---------------------------------------------------------------------------
@@ -650,6 +722,12 @@ func buildHybridColumnDefaultValue(defMap map[string]any, dataType datatypes.Dat
 	return nil, fmt.Errorf("unreachable: default block passed validation but no type matched")
 }
 
+func toColumns(columns []string) []sdk.Column {
+	return collections.Map(columns, func(column string) sdk.Column {
+		return sdk.Column{Value: column}
+	})
+}
+
 func buildOutOfLineConstraints(d *schema.ResourceData) ([]sdk.HybridTableOutOfLineConstraintRequest, error) {
 	constraints := make([]sdk.HybridTableOutOfLineConstraintRequest, 0)
 
@@ -657,7 +735,7 @@ func buildOutOfLineConstraints(d *schema.ResourceData) ([]sdk.HybridTableOutOfLi
 	pkList := d.Get("primary_key_constraint").([]any)
 	pkMap := pkList[0].(map[string]any)
 	pkConstraint := sdk.NewHybridTableOutOfLineConstraintRequest(sdk.ColumnConstraintTypePrimaryKey).
-		WithColumns(expandStringList(pkMap["columns"].([]any)))
+		WithColumns(toColumns(expandStringList(pkMap["columns"].([]any))))
 	if pkName, ok := pkMap["name"].(string); ok && pkName != "" {
 		pkConstraint.WithName(pkName)
 	}
@@ -668,7 +746,7 @@ func buildOutOfLineConstraints(d *schema.ResourceData) ([]sdk.HybridTableOutOfLi
 		for _, ucRaw := range v.(*schema.Set).List() {
 			ucMap := ucRaw.(map[string]any)
 			ucConstraint := sdk.NewHybridTableOutOfLineConstraintRequest(sdk.ColumnConstraintTypeUnique).
-				WithColumns(expandStringList(ucMap["columns"].([]any)))
+				WithColumns(toColumns(expandStringList(ucMap["columns"].([]any))))
 			if ucName, ok := ucMap["name"].(string); ok && ucName != "" {
 				ucConstraint.WithName(ucName)
 			}
@@ -681,7 +759,7 @@ func buildOutOfLineConstraints(d *schema.ResourceData) ([]sdk.HybridTableOutOfLi
 		for _, fkRaw := range v.(*schema.Set).List() {
 			fkMap := fkRaw.(map[string]any)
 			fkConstraint := sdk.NewHybridTableOutOfLineConstraintRequest(sdk.ColumnConstraintTypeForeignKey).
-				WithColumns(expandStringList(fkMap["columns"].([]any)))
+				WithColumns(toColumns(expandStringList(fkMap["columns"].([]any))))
 			if fkName, ok := fkMap["name"].(string); ok && fkName != "" {
 				fkConstraint.WithName(fkName)
 			}
@@ -689,9 +767,9 @@ func buildOutOfLineConstraints(d *schema.ResourceData) ([]sdk.HybridTableOutOfLi
 			if err != nil {
 				return nil, fmt.Errorf("invalid table_name identifier: %w", err)
 			}
-			fkConstraint.WithForeignKey(sdk.OutOfLineForeignKey{
+			fkConstraint.WithForeignKey(sdk.HybridTableOutOfLineForeignKeyRequest{
 				TableName:   refTableId,
-				ColumnNames: expandStringList(fkMap["ref_columns"].([]any)),
+				ColumnNames: toColumns(expandStringList(fkMap["ref_columns"].([]any))),
 			})
 			constraints = append(constraints, *fkConstraint)
 		}
@@ -710,10 +788,10 @@ func buildOutOfLineIndexes(d *schema.ResourceData) []sdk.HybridTableOutOfLineInd
 			idxMap := idxRaw.(map[string]any)
 			req := sdk.NewHybridTableOutOfLineIndexRequest(
 				idxMap["name"].(string),
-				expandStringList(idxMap["columns"].([]any)),
+				toColumns(expandStringList(idxMap["columns"].([]any))),
 			)
 			if incRaw, ok := idxMap["include_columns"].(*schema.Set); ok && incRaw.Len() > 0 {
-				req.WithIncludeColumns(expandStringList(incRaw.List()))
+				req.WithIncludeColumns(toColumns(expandStringList(incRaw.List())))
 			}
 			indexes = append(indexes, *req)
 		}
@@ -802,11 +880,13 @@ func GetReadHybridTableFunc(withExternalChangesMarking bool) schema.ReadContextF
 			return diags
 		}
 
+		constraints, err := client.HybridTables.GetConstraints(ctx, id)
+		if err != nil {
+			return diag.FromErr(fmt.Errorf("reading hybrid table constraints: %w", err))
+		}
+
 		if withExternalChangesMarking {
-			if err = handleExternalChangesToObjectInShow(
-				d,
-				outputMapping{"comment", "comment", hybridTable.Comment, hybridTable.Comment, nil},
-			); err != nil {
+			if err = handleExternalChangesToHybridTableConstraints(d, constraints); err != nil {
 				return diag.FromErr(err)
 			}
 		}
@@ -814,11 +894,6 @@ func GetReadHybridTableFunc(withExternalChangesMarking bool) schema.ReadContextF
 		columnState, err := buildHybridColumnStateFromDescribe(details, d)
 		if err != nil {
 			return diag.FromErr(err)
-		}
-
-		constraints, err := client.HybridTables.GetConstraints(ctx, id)
-		if err != nil {
-			return diag.FromErr(fmt.Errorf("reading hybrid table constraints: %w", err))
 		}
 
 		indexes, err := client.HybridTables.ShowIndexes(ctx,
@@ -830,12 +905,10 @@ func GetReadHybridTableFunc(withExternalChangesMarking bool) schema.ReadContextF
 		errs := errors.Join(
 			d.Set(ShowOutputAttributeName, []map[string]any{schemas.HybridTableToSchema(hybridTable)}),
 			d.Set(DescribeOutputAttributeName, schemas.HybridTableDetailsListToSchema(details)),
+			d.Set(ShowKeysOutputAttributeName, collections.Map(constraints, func(c sdk.HybridTableConstraint) map[string]any { return schemas.HybridTableConstraintToSchema(&c) })),
 			d.Set(FullyQualifiedNameAttributeName, id.FullyQualifiedName()),
 			d.Set("comment", hybridTable.Comment),
 			d.Set("column", columnState),
-			d.Set("primary_key_constraint", buildPrimaryKeyStateFromConstraints(constraints)),
-			d.Set("unique_constraint", buildUniqueConstraintsStateFromConstraints(constraints)),
-			d.Set("foreign_key_constraint", buildForeignKeysStateFromConstraints(constraints)),
 			d.Set("index", readIndexState(indexes, constraints)),
 		)
 		if errs != nil {
@@ -920,7 +993,7 @@ func UpdateHybridTable(ctx context.Context, d *schema.ResourceData, meta any) di
 			for i, col := range removed {
 				dropNames[i] = col.name
 			}
-			dropReq := sdk.NewHybridTableDropColumnActionRequest(dropNames).WithIfExists(true)
+			dropReq := sdk.NewHybridTableDropColumnActionRequest(toColumns(dropNames)).WithIfExists(true)
 			if err := client.HybridTables.Alter(ctx, sdk.NewAlterHybridTableRequest(id).WithDropColumnAction(*dropReq)); err != nil {
 				d.Partial(true)
 				return diag.FromErr(fmt.Errorf("error dropping columns from hybrid table %v: %w", id.FullyQualifiedName(), err))
@@ -1080,6 +1153,55 @@ func buildHybridColumnStateFromDescribe(details []sdk.HybridTableDetails, d *sch
 		flattened = append(flattened, flat)
 	}
 	return flattened, nil
+}
+
+// handleExternalChangesToHybridTableConstraints rewrites the `primary_key_constraint`,
+// `unique_constraint` and `foreign_key_constraint` blocks when Snowflake reports constraints that
+// differ from the ones recorded in the previous `show_keys_output`.
+func handleExternalChangesToHybridTableConstraints(d *schema.ResourceData, constraints []sdk.HybridTableConstraint) error {
+	previous, _ := d.Get(ShowKeysOutputAttributeName).([]any)
+	if len(previous) == 0 || hybridTableConstraintsEqualToState(previous, constraints) {
+		return nil
+	}
+	return setHybridTableConstraintBlocks(d, constraints)
+}
+
+// hybridTableConstraintsEqualToState compares the constraints Snowflake reports with the rows of
+// the previous `show_keys_output`.
+func hybridTableConstraintsEqualToState(previous []any, constraints []sdk.HybridTableConstraint) bool {
+	if len(previous) != len(constraints) {
+		return false
+	}
+	for i, rawEntry := range previous {
+		entry, ok := rawEntry.(map[string]any)
+		if !ok {
+			return false
+		}
+		constraint := constraints[i]
+		columns, _ := entry["columns"].([]any)
+		if entry["kind"] != string(constraint.Kind) ||
+			entry["name"] != constraint.Name ||
+			!slices.Equal(expandStringList(columns), constraint.Columns) {
+			return false
+		}
+		if constraint.Kind != sdk.ColumnConstraintTypeForeignKey {
+			continue
+		}
+		referencedColumns, _ := entry["referenced_columns"].([]any)
+		if entry["referenced_table"] != constraint.ReferencedTable.FullyQualifiedName() ||
+			!slices.Equal(expandStringList(referencedColumns), constraint.ReferencedColumns) {
+			return false
+		}
+	}
+	return true
+}
+
+func setHybridTableConstraintBlocks(d *schema.ResourceData, constraints []sdk.HybridTableConstraint) error {
+	return errors.Join(
+		d.Set("primary_key_constraint", buildPrimaryKeyStateFromConstraints(constraints)),
+		d.Set("unique_constraint", buildUniqueConstraintsStateFromConstraints(constraints)),
+		d.Set("foreign_key_constraint", buildForeignKeysStateFromConstraints(constraints)),
+	)
 }
 
 // buildPrimaryKeyStateFromConstraints returns the primary_key_constraint block (at most one) from
